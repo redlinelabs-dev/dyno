@@ -9,6 +9,9 @@ in `bench/` (see `bench/README.md` to rerun). Raw measurements are in `bench/res
 
 ## Short answer
 
+The owner chose Go on 2026-10-30 (ADR-0006): the gap below is small on a Docker
+host and Go is easier to maintain. The recommendation as written follows.
+
 **Use Rust: hyper 1.x on a current-thread tokio runtime** (axum on the same runtime is
 fine if the routing gets bigger). Here is how it measured against the owner's criteria:
 

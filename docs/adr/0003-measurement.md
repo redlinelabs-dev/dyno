@@ -22,7 +22,9 @@ Evidence: `docs/research/methodology-and-architecture.md` (§6 lists the reasoni
    detects and labels a result limited by the client's CPU. 10 Gb/s is for a
    native client and node-to-node tests.
 8. A self-check warns when compression, a CDN or tunnel, a small proxy body
-   limit, or client CPU saturation could make the result wrong.
+   limit, or client CPU saturation could make the result wrong. It also
+   flags loaded latency as unreliable when the server itself was CPU-bound
+   during the test (ADR-0006).
 9. The compose file defaults to host networking and plain HTTP on the LAN,
    with optional TLS. The docs cover reverse-proxy buffering settings and say
    that tests through a Cloudflare tunnel are unsupported.

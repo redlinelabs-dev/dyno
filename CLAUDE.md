@@ -25,7 +25,7 @@ behind progressive disclosure. Private repo, solo developer.
 
 | Path | What |
 |---|---|
-| `server/` | Rust server: test endpoints, JSON API, scheduler, SQLite, embedded web assets. One static binary. |
+| `server/` | Go server: test endpoints, JSON API, scheduler, SQLite, embedded web assets. One static binary. |
 | `web/` | TypeScript UI, no framework, bundled by Bun into static files the server embeds. |
 | `bench/` | Reproducible runtime benchmark (`bench/README.md`). Also the base for footprint regression checks. |
 | `prototypes/` | Standalone HTML prototypes. Reference only, never imported. |
@@ -37,7 +37,7 @@ them. Follow ADR-0002 for layout and the API contract.
 
 - **Footprint is a feature.** Every change to the server keeps idle RSS,
   RSS under load, CPU per GB and the soak slope within the budgets in
-  ADR-0001. Measure with `bench/`, report the numbers in the PR, and treat
+  ADR-0006. Measure with `bench/`, report the numbers in the PR, and treat
   a regression as a bug.
 - **The web UI is just another API client.** It uses only the public HTTP API
   a native app would use (ADR-0002). Server-rendered state or UI-only
@@ -61,11 +61,12 @@ them. Follow ADR-0002 for layout and the API contract.
 ## Tooling
 
 TypeScript scripts run directly with Bun (`bun scripts/x.ts`), using Bun's own
-APIs. Python is not used here. Rust is the server language. Build and test
+APIs. Python is not used here. Go is the server language. Build and test
 commands go in a root `Makefile` once milestone 1 lands; list them here then.
 
 This machine is a headless Debian box. Toolchains are user-local: Go in
-`~/.local/go`, Zig in `~/.local/zig`, Rust through rustup. Docker isn't
+`~/.local/go` (not on PATH; use `~/.local/go/bin/go`). Zig and Rust are
+there only for `bench/`. Docker isn't
 installed here, so container builds and device tests run on the owner's other
 machines or in CI. When you hand back work you couldn't run, say exactly what
 is unverified.

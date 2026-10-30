@@ -5,7 +5,7 @@ Evidence: `docs/research/methodology-and-architecture.md` §5.
 
 ## Decision
 
-- **One container, one process, one static binary.** The Rust server embeds
+- **One container, one process, one static binary.** The Go server embeds
   the built web assets and serves them. `compose.yaml` needs one service and one
   volume for data. No `.env` is required to start.
 - **The API is the product boundary.** Plain HTTP plus JSON. The server issues
@@ -29,8 +29,8 @@ Evidence: `docs/research/methodology-and-architecture.md` §5.
 - **Hot-path rules:** downloads come from one pre-generated random buffer;
   uploads read into fixed scratch buffers; per-session state is fixed-size;
   connection counts and timeouts are hard caps.
-- **Paid features** (if the licence split happens) live in their own Rust
-  module and web bundle, gated by an offline-verified licence file. The free
+- **Paid features** (if the licence split happens) live in their own Go
+  package and web bundle, gated by an offline-verified licence file. The free
   build compiles and runs without them.
 
 ## Consequences

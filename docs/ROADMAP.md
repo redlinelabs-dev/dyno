@@ -7,19 +7,19 @@ Before starting one, ask the owner the decisions-pending items listed under
 ## M0. Research and prototypes (done 2026-10-30)
 
 Brief, three research docs, a runtime benchmark, two rounds of UI prototypes,
-the combined pick (`prototypes/dyno-ui.html`) and ADRs 0001–0005.
+the combined pick (`prototypes/dyno-ui.html`) and ADRs 0001–0006.
 
 ## M1. Walking skeleton
 
-Needs: #3 (Rust confirmed).
+Needs: nothing open. Runtime and budgets: ADR-0006.
 
-- A `server/` Rust crate serving `/dl`, `/ul`, `/ping`, `/api/v1/plan` and
+- A `server/` Go module serving `/dl`, `/ul`, `/ping`, `/api/v1/plan` and
   one embedded static page, following ADR-0002's hot-path rules.
-- A root `Makefile` with `make check` (fmt, clippy, tests, footprint check) and
+- A root `Makefile` with `make check` (gofmt, go vet, go test -race, footprint check) and
   `make bench`.
-- A footprint check, adapted from `bench/`, that fails when any ADR-0001 budget
+- A footprint check, adapted from `bench/`, that fails when any ADR-0006 budget
   is exceeded.
-- A `Dockerfile` (`FROM scratch`, non-root, static musl, amd64 and arm64) and a
+- A `Dockerfile` (`FROM scratch`, non-root, `CGO_ENABLED=0`, amd64 and arm64) and a
   `compose.yaml` that starts dyno with no other files.
 
 Done when `make check` passes here, the footprint check reports every

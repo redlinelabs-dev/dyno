@@ -4,14 +4,8 @@ Owner calls that are still open. A build session asks about these and leaves
 them undecided in code. When one is answered, record it in an ADR in
 `docs/adr/` and delete it here. Each item carries a recommendation, so a short
 answer is enough. Item numbers are stable; answered items are gone from
-this list, not renumbered. Answered so far: #1 (ADR-0004), #2 (ADR-0005).
-
-## 3. Confirm Rust for the server
-
-ADR-0001 picks Rust (current-thread tokio) on measured footprint. Go was a
-close second: about 3× the idle memory (11 MiB against 3.7 MiB), but simpler
-to maintain. Recommendation: Rust, since the brief asks for the smallest
-footprint possible.
+this list, not renumbered. Answered so far: #1 (ADR-0004), #2 (ADR-0005),
+#3 (ADR-0006).
 
 ## 4. What v1 tests
 

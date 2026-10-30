@@ -1,6 +1,6 @@
 # ADR-0001: Rust on a current-thread tokio runtime for the server
 
-Status: accepted 2026-10-30, awaiting the owner's confirmation (decisions-pending #3).
+Status: superseded 2026-10-30 by ADR-0006 (Go). Kept for the record.
 Evidence: `docs/research/runtime-benchmark.md`, raw data in `bench/results/`.
 
 ## Context
