@@ -1,0 +1,5 @@
+{"at":"2026-10-30T02:28:02.600Z","server":"go","at1s":{"VmHWM":11056,"VmRSS":11056,"RssAnon":6476,"RssFile":4580,"Threads":6},"at60s":{"VmHWM":11056,"VmRSS":11056,"RssAnon":6476,"RssFile":4580,"Threads":6}}
+{"at":"2026-10-30T02:28:02.600Z","server":"rust-mt","at1s":{"VmHWM":4080,"VmRSS":4080,"RssAnon":1276,"RssFile":2804,"Threads":5},"at60s":{"VmHWM":4088,"VmRSS":4088,"RssAnon":1284,"RssFile":2804,"Threads":5}}
+{"at":"2026-10-30T02:28:02.600Z","server":"rust-ct","at1s":{"VmHWM":3788,"VmRSS":3788,"RssAnon":1208,"RssFile":2580,"Threads":1},"at60s":{"VmHWM":3788,"VmRSS":3788,"RssAnon":1208,"RssFile":2580,"Threads":1}}
+{"at":"2026-10-30T02:28:02.600Z","server":"zig","at1s":{"VmHWM":3768,"VmRSS":3768,"RssAnon":3504,"RssFile":264,"Threads":2},"at60s":{"VmHWM":3768,"VmRSS":3768,"RssAnon":3504,"RssFile":264,"Threads":2}}
+{"at":"2026-10-30T03:06:14.417Z","server":"bun","at1s":{"VmHWM":20976,"VmRSS":20976,"RssAnon":3208,"RssFile":17768,"Threads":5},"at60s":{"VmHWM":21208,"VmRSS":21208,"RssAnon":3056,"RssFile":18152,"Threads":2}}

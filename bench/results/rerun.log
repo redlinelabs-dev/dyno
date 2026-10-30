@@ -1,0 +1,58 @@
+[03:05:13] cold start bun
+[03:05:14] idle RSS: starting all servers, sampling at 1 s and 60 s
+[03:06:24] bun 1 dl c=1 23.2 Gbit/s 0.345 cpu-s/GB peak 35100 KiB err 0
+[03:06:32] bun 1 dl c=8 23.7 Gbit/s 0.337 cpu-s/GB peak 35992 KiB err 0
+[03:06:40] bun 1 dl c=32 24.1 Gbit/s 0.331 cpu-s/GB peak 35344 KiB err 0
+[03:06:52] bun 1 dl paced 1G 1.00 Gbit/s 3.6% cpu
+[03:07:00] bun 1 ul c=1 35.1 Gbit/s 0.256 cpu-s/GB peak 98352 KiB err 0
+[03:07:08] bun 1 ul c=8 26.7 Gbit/s 0.325 cpu-s/GB peak 90320 KiB err 0
+[03:07:16] bun 1 ul c=32 21.5 Gbit/s 0.406 cpu-s/GB peak 175312 KiB err 0
+[03:07:28] bun 1 ul paced 1G 1.00 Gbit/s 8.6% cpu
+[03:07:38] bun 1 ping p50/p99 idle 45/76 us, loaded 45/65 us
+[03:07:45] bun 1 ping p50/p99 with 8 streams paced to 1 Gbit/s: 46/76 us
+[03:07:53] bun 1 churn 20787 conn/s, err 0, rss 38664->38756 KiB, threads 6->6
+[03:08:01] bun 2 dl c=1 26.1 Gbit/s 0.306 cpu-s/GB peak 35012 KiB err 0
+[03:08:09] bun 2 dl c=8 25.1 Gbit/s 0.318 cpu-s/GB peak 35716 KiB err 0
+[03:08:17] bun 2 dl c=32 23.8 Gbit/s 0.336 cpu-s/GB peak 35804 KiB err 0
+[03:08:29] bun 2 dl paced 1G 1.00 Gbit/s 3.8% cpu
+[03:08:37] bun 2 ul c=1 31.1 Gbit/s 0.291 cpu-s/GB peak 103616 KiB err 0
+[03:08:45] bun 2 ul c=8 28.6 Gbit/s 0.304 cpu-s/GB peak 85980 KiB err 0
+[03:08:53] bun 2 ul c=32 21.9 Gbit/s 0.396 cpu-s/GB peak 173308 KiB err 0
+[03:09:05] bun 2 ul paced 1G 1.00 Gbit/s 8.7% cpu
+[03:09:15] bun 2 ping p50/p99 idle 45/71 us, loaded 48/75 us
+[03:09:22] bun 2 ping p50/p99 with 8 streams paced to 1 Gbit/s: 47/81 us
+[03:09:30] bun 2 churn 21514 conn/s, err 0, rss 38460->38460 KiB, threads 6->6
+[03:09:38] bun 3 dl c=1 25.8 Gbit/s 0.310 cpu-s/GB peak 35204 KiB err 0
+[03:09:46] bun 3 dl c=8 23.8 Gbit/s 0.336 cpu-s/GB peak 35696 KiB err 0
+[03:09:54] bun 3 dl c=32 24.0 Gbit/s 0.334 cpu-s/GB peak 36308 KiB err 0
+[03:10:06] bun 3 dl paced 1G 1.00 Gbit/s 3.8% cpu
+[03:10:14] bun 3 ul c=1 31.3 Gbit/s 0.290 cpu-s/GB peak 103128 KiB err 0
+[03:10:22] bun 3 ul c=8 28.8 Gbit/s 0.302 cpu-s/GB peak 86568 KiB err 0
+[03:10:30] bun 3 ul c=32 22.4 Gbit/s 0.387 cpu-s/GB peak 170464 KiB err 0
+[03:10:42] bun 3 ul paced 1G 1.00 Gbit/s 9.1% cpu
+[03:10:52] bun 3 ping p50/p99 idle 46/77 us, loaded 45/63 us
+[03:10:59] bun 3 ping p50/p99 with 8 streams paced to 1 Gbit/s: 47/87 us
+[03:11:07] bun 3 churn 19537 conn/s, err 0, rss 38696->38696 KiB, threads 6->6
+[03:11:16] go 1 ping p50/p99 with 8 streams paced to 1 Gbit/s: 66/128 us
+[03:11:23] rust-mt 1 ping p50/p99 with 8 streams paced to 1 Gbit/s: 46/73 us
+[03:11:30] rust-ct 1 ping p50/p99 with 8 streams paced to 1 Gbit/s: 45/78 us
+[03:11:37] zig 1 ping p50/p99 with 8 streams paced to 1 Gbit/s: 38/59 us
+[03:11:44] bun 1 ping p50/p99 with 8 streams paced to 1 Gbit/s: 44/68 us
+[03:11:52] go 2 ping p50/p99 with 8 streams paced to 1 Gbit/s: 68/117 us
+[03:11:59] rust-mt 2 ping p50/p99 with 8 streams paced to 1 Gbit/s: 46/68 us
+[03:12:06] rust-ct 2 ping p50/p99 with 8 streams paced to 1 Gbit/s: 46/73 us
+[03:12:13] zig 2 ping p50/p99 with 8 streams paced to 1 Gbit/s: 40/68 us
+[03:12:20] bun 2 ping p50/p99 with 8 streams paced to 1 Gbit/s: 44/73 us
+[03:12:27] go 3 ping p50/p99 with 8 streams paced to 1 Gbit/s: 66/115 us
+[03:12:34] rust-mt 3 ping p50/p99 with 8 streams paced to 1 Gbit/s: 52/106 us
+[03:12:41] rust-ct 3 ping p50/p99 with 8 streams paced to 1 Gbit/s: 45/66 us
+[03:12:48] zig 3 ping p50/p99 with 8 streams paced to 1 Gbit/s: 38/60 us
+[03:12:55] bun 3 ping p50/p99 with 8 streams paced to 1 Gbit/s: 46/78 us
+[03:12:57] soak: 600s, servers in parallel on their own cores, clients on 7-9
+[03:23:02] bun slope 145.0 KiB/min (after 2m -393.7) rss 20420->48448 {"abort_ul":18}
+[03:23:04] hold: 1000 stalled connections per server for 70 s, all servers at once
+[03:24:26] go {"closed_by_server":1000,"fresh_request_ok":true,"mode":"hold","n":1000,"rss_before_kib":11044,"rss_end_kib":28320,"rss_held_kib":27480,"rss_released_kib":28320,"threads_held":7,"threads_released":7,"wait_s":70}
+[03:24:26] rust-mt {"closed_by_server":1000,"fresh_request_ok":true,"mode":"hold","n":1000,"rss_before_kib":4156,"rss_end_kib":17316,"rss_held_kib":18392,"rss_released_kib":17316,"threads_held":5,"threads_released":5,"wait_s":70}
+[03:24:26] rust-ct {"closed_by_server":1000,"fresh_request_ok":true,"mode":"hold","n":1000,"rss_before_kib":3732,"rss_end_kib":17812,"rss_held_kib":17808,"rss_released_kib":17812,"threads_held":1,"threads_released":1,"wait_s":70}
+[03:24:26] zig {"closed_by_server":0,"fresh_request_ok":true,"mode":"hold","n":1000,"rss_before_kib":1924,"rss_end_kib":598068,"rss_held_kib":597796,"rss_released_kib":598068,"threads_held":1002,"threads_released":1003,"wait_s":70}
+[03:24:26] bun {"closed_by_server":1000,"fresh_request_ok":true,"mode":"hold","n":1000,"rss_before_kib":20384,"rss_end_kib":21216,"rss_held_kib":21388,"rss_released_kib":21472,"threads_held":5,"threads_released":5,"wait_s":70}

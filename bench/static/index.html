@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dyno bench</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; }
+  button { font: inherit; padding: .5rem 1rem; }
+  output { display: block; margin-top: 1rem; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<h1>dyno bench server</h1>
+<p>Static page served by the runtime benchmark. Endpoints: <code>/dl?bytes=N</code>, <code>/ul</code>, <code>/ping</code>.</p>
+<button id="go">Ping x10</button>
+<output id="out"></output>
+<script>
+document.getElementById("go").onclick = async () => {
+  const t = [];
+  for (let i = 0; i < 10; i++) {
+    const s = performance.now();
+    await fetch("/ping", { cache: "no-store" });
+    t.push(performance.now() - s);
+  }
+  t.sort((a, b) => a - b);
+  document.getElementById("out").textContent = `median ${t[5].toFixed(2)} ms`;
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,633 @@
+<title>Dyno Prototypes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Barlow:wght@400;500;600&family=Big+Shoulders+Display:wght@600;800;900&family=Chivo+Mono:wght@400;500;600&family=Chivo:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: a quiet shell bar picks one of three directions; the stage below is a container-query box so a phone frame can be previewed on desktop. */
+:root {
+  --sh-bg: #E7EAEE; --sh-fg: #15171C; --sh-mute: #5B636F; --sh-line: #C9CFD7; --sh-on: #15171C; --sh-onfg: #F2EDE2;
+  --f-shell: "Archivo", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --sh-bg: #0B0D11; --sh-fg: #E6E8EB; --sh-mute: #8B929D; --sh-line: #272B32; --sh-on: #F2EDE2; --sh-onfg: #15171C; color-scheme: dark } }
+:root[data-theme="dark"] { --sh-bg: #0B0D11; --sh-fg: #E6E8EB; --sh-mute: #8B929D; --sh-line: #272B32; --sh-on: #F2EDE2; --sh-onfg: #15171C; color-scheme: dark }
+
+html, body { min-height: 100% }
+body { background: var(--sh-bg); color: var(--sh-fg); font-family: var(--f-shell); }
+.shell { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 32px; display: grid; gap: 14px; max-width: 1240px; margin: 0 auto; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.bar h1 { font-size: 15px; font-weight: 600; margin: 0; font-variation-settings: "wdth" 100; }
+.bar h1 span { color: var(--sh-mute); font-weight: 400 }
+.pick { display: inline-flex; border: 1px solid var(--sh-line); border-radius: 999px; padding: 3px; gap: 2px; }
+.pick a { color: var(--sh-fg); text-decoration: none; font-size: 14px; padding: 6px 14px; border-radius: 999px; }
+.pick a[aria-current="page"] { background: var(--sh-on); color: var(--sh-onfg); }
+.bar .sp { flex: 1 }
+.bar .tag { font-size: 12px; color: var(--sh-mute) }
+.frame-t { font: inherit; font-size: 13px; color: var(--sh-fg); background: none; border: 1px solid var(--sh-line); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.frame-t[aria-pressed="true"] { background: var(--sh-on); color: var(--sh-onfg); border-color: var(--sh-on) }
+.blurb { margin: 0; font-size: 14px; color: var(--sh-mute); max-width: 72ch; line-height: 1.5 }
+@media (max-width: 520px) { .frame-t { display: none } }
+
+.stage { container: stage / inline-size; border-radius: 18px; overflow: hidden; border: 1px solid var(--sh-line); }
+.stage.phone { max-width: 390px; width: 100%; margin: 0 auto; border-radius: 36px; border: 10px solid var(--sh-on); min-height: 800px; }
+:focus-visible { outline: 2px solid var(--focus, #FF5A1F); outline-offset: 2px; }
+button { -webkit-tap-highlight-color: transparent }
+
+/* ---------- shared components, styled through each view's --s-* tokens ---------- */
+.v { min-height: 640px; background: var(--bg); color: var(--fg); }
+.stage.phone .v { min-height: 780px }
+.pnl { background: var(--s-panel); border: 1px solid var(--s-line); border-radius: var(--s-radius); padding: 20px; color: var(--fg); font-family: var(--s-font); display: grid; gap: 16px; min-width: 0; }
+.pnl h3 { margin: 0; font-size: 17px; font-weight: 600 }
+.note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--s-mute) }
+.setgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px 22px; }
+.field { display: grid; gap: 6px; align-content: start; border: 0; padding: 0; margin: 0; min-width: 0 }
+.field > label, .field > legend { font-size: 13px; color: var(--s-mute); padding: 0; margin-bottom: 6px }
+.field select, .field input[type="number"] { font: inherit; font-size: 15px; background: var(--s-input); color: var(--fg); border: 1px solid var(--s-line); border-radius: calc(var(--s-radius) / 2); padding: 8px 10px; min-width: 0; width: 100% }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--s-line); border-radius: calc(var(--s-radius) / 2); overflow: hidden; width: fit-content }
+.seg label { position: relative; cursor: pointer; font-size: 14px }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
+.seg span { display: block; padding: 7px 13px }
+.seg input:checked + span { background: var(--s-accent); color: var(--s-on) }
+.seg input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: -3px }
+.exp { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center }
+.sbtn { font: inherit; font-size: 14px; background: none; color: var(--fg); border: 1px solid var(--s-line); border-radius: calc(var(--s-radius) / 2); padding: 7px 12px; cursor: pointer }
+.sbtn:hover { border-color: var(--s-mute) }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 9px 18px; margin: 0; font-size: 14.5px }
+.kv dt { color: var(--s-mute) }
+.kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-family: var(--s-num); }
+.tw { overflow-x: auto; }
+.hist { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; min-width: 520px }
+.hist th { text-align: left; font-weight: 500; color: var(--s-mute); font-size: 12.5px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--s-line) }
+.hist td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--s-line); white-space: nowrap }
+.hist td.n { font-family: var(--s-num) }
+.tl { display: block; width: 100%; height: 120px }
+.tl-d { fill: var(--c-down); fill-opacity: .28; stroke: var(--c-down); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.tl-u { fill: var(--c-up); fill-opacity: .28; stroke: var(--c-up); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.tl-l { fill: none; stroke: var(--c-lat); stroke-width: 1.25; vector-effect: non-scaling-stroke }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--s-mute); margin: 0; padding: 0; list-style: none }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px }
+
+/* =================== A · TACH =================== */
+.v-tach {
+  --bg: #0F1115; --fg: #F2EDE2; --face: #181A20; --bezel: #D8DBE0; --mute: #8D929B; --red: #E3242B; --deep: #8E141B; --needle: #FF5A1F; --line: #2A2E36;
+  --s-panel: #15171C; --s-line: #2A2E36; --s-mute: #8D929B; --s-accent: #E3242B; --s-on: #F2EDE2; --s-input: #0F1115; --s-radius: 10px;
+  --s-font: "Barlow", system-ui, sans-serif; --s-num: "Big Shoulders Display", "Barlow", sans-serif; --focus: #FF5A1F;
+  --c-down: #E3242B; --c-up: #D8DBE0; --c-lat: #FF5A1F;
+  color-scheme: dark; font-family: var(--s-font);
+  display: grid; justify-items: center; align-content: start; gap: 22px; padding: 22px max(16px, 3cqi) 40px;
+}
+.t-top { width: 100%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--mute) }
+.t-brand { font-family: "Big Shoulders Display", sans-serif; font-weight: 900; font-size: 24px; color: var(--fg); letter-spacing: .02em; font-style: italic; transform: skewX(-6deg) }
+.t-brand b { color: var(--red); font-weight: 900 }
+.t-dialwrap { position: relative; width: min(100%, 460px); aspect-ratio: 1; margin-bottom: -40px; }
+.t-dial { width: 100%; height: 100%; display: block; overflow: visible }
+.t-dial .tick { stroke: var(--fg) } .t-dial .tick.minor { stroke: var(--mute) }
+.t-dial .lab { fill: var(--fg); font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 22px; text-anchor: middle; dominant-baseline: middle }
+.t-needle { transform-box: view-box; transform-origin: 200px 200px; transition: transform .16s linear }
+.t-prog { fill: none; stroke: var(--fg); stroke-width: 3; stroke-linecap: round; opacity: .9 }
+.t-phase { fill: var(--mute); font-size: 15px; text-anchor: middle; font-family: "Barlow", sans-serif; letter-spacing: .04em }
+.t-val { fill: var(--fg); font-family: "Big Shoulders Display", sans-serif; font-weight: 900; font-size: 74px; text-anchor: middle; font-variant-numeric: tabular-nums }
+.t-unit { fill: var(--mute); font-size: 15px; text-anchor: middle; font-family: "Barlow", sans-serif }
+.t-start { position: absolute; left: 50%; top: 50%; width: 26%; aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; cursor: pointer;
+  background: radial-gradient(circle at 50% 38%, #2A2D35, #121318 70%); color: var(--fg); border: 3px solid var(--red);
+  box-shadow: 0 0 0 6px #0B0D11, 0 0 0 7px #3A3E47, 0 10px 30px rgba(0,0,0,.6);
+  font-family: "Big Shoulders Display", sans-serif; font-weight: 900; font-size: clamp(18px, 5.4cqi, 28px); letter-spacing: .06em; line-height: 1; display: grid; place-content: center; gap: 4px }
+.t-start small { font-family: "Barlow", sans-serif; font-weight: 500; font-size: 11px; letter-spacing: .08em; color: var(--mute) }
+.t-start:hover { border-color: var(--needle) }
+.t-start:active { scale: .97 }
+.t-read { width: min(100%, 620px); display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); }
+.t-cell { padding: 14px 6px 0; display: grid; gap: 2px; justify-items: center; border-top: 3px solid transparent; margin-top: -2px; }
+.t-cell.on { border-top-color: var(--red) }
+.t-cell span { font-size: 13px; color: var(--mute) }
+.t-cell b { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums }
+.t-cell em { font-style: normal; font-size: 12px; color: var(--mute) }
+.t-more { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center }
+.t-more button { font: inherit; font-size: 14px; font-weight: 500; color: var(--fg); background: #181A20; border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px; cursor: pointer }
+.t-more button[aria-expanded="true"] { background: var(--fg); color: #15171C; border-color: var(--fg) }
+.v-tach .pnl { width: min(100%, 820px) }
+.t-tele { display: grid; grid-template-columns: auto 1fr; gap: 20px 28px; align-items: start }
+.grade { display: grid; place-items: center; width: 92px; height: 92px; border-radius: 14px; background: var(--s-accent); color: var(--s-on); font-family: var(--s-num); font-weight: 900; font-size: 54px; line-height: 1 }
+.gradebox { display: grid; gap: 8px; justify-items: start; max-width: 200px }
+.gradebox p { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--s-mute) }
+@container stage (max-width: 620px) {
+  .t-tele { grid-template-columns: 1fr }
+  .gradebox { max-width: none; grid-template-columns: auto 1fr; align-items: center; gap: 14px }
+  .t-cell b { font-size: 34px }
+  .t-dialwrap { margin-bottom: -28px }
+}
+
+/* =================== B · QUIET =================== */
+.v-quiet {
+  --bg: #EEF0F2; --fg: #121418; --mute: #646B76; --line: #D3D8DE; --accent: #D91F26;
+  --s-panel: #F8F9FA; --s-line: #D3D8DE; --s-mute: #646B76; --s-accent: #121418; --s-on: #F8F9FA; --s-input: #FFFFFF; --s-radius: 12px;
+  --s-font: "Archivo", system-ui, sans-serif; --s-num: "Archivo", system-ui, sans-serif; --focus: #D91F26;
+  --c-down: #121418; --c-up: #8A919C; --c-lat: #D91F26;
+  font-family: var(--s-font); display: grid; align-content: start; gap: 0; padding: 22px max(20px, 5cqi) 40px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .v-quiet {
+  --bg: #0F1114; --fg: #ECEEF0; --mute: #8C939E; --line: #262B32; --accent: #FF4A50;
+  --s-panel: #15181C; --s-line: #262B32; --s-mute: #8C939E; --s-accent: #ECEEF0; --s-on: #0F1114; --s-input: #0F1114; --focus: #FF4A50;
+  --c-down: #ECEEF0; --c-up: #6B7380; --c-lat: #FF4A50; color-scheme: dark } }
+:root[data-theme="dark"] .v-quiet {
+  --bg: #0F1114; --fg: #ECEEF0; --mute: #8C939E; --line: #262B32; --accent: #FF4A50;
+  --s-panel: #15181C; --s-line: #262B32; --s-mute: #8C939E; --s-accent: #ECEEF0; --s-on: #0F1114; --s-input: #0F1114; --focus: #FF4A50;
+  --c-down: #ECEEF0; --c-up: #6B7380; --c-lat: #FF4A50; color-scheme: dark }
+.q-top { display: flex; align-items: center; justify-content: space-between; gap: 12px }
+.q-brand { font-weight: 700; font-size: 19px; font-variation-settings: "wdth" 125; letter-spacing: -.01em }
+.q-top nav { display: flex; gap: 4px }
+.q-top nav button, .q-link { font: inherit; font-size: 14px; color: var(--mute); background: none; border: 0; padding: 6px 10px; border-radius: 8px; cursor: pointer }
+.q-top nav button[aria-expanded="true"], .q-top nav button:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 7%, transparent) }
+.q-pnls { display: grid; gap: 12px; margin-top: 14px }
+.q-main { display: grid; gap: 0; padding-top: clamp(40px, 9cqi, 110px) }
+.q-label { margin: 0 0 6px; font-size: 15px; color: var(--mute); display: flex; align-items: center; gap: 8px }
+.q-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); opacity: 0 }
+.running .q-dot { opacity: 1; animation: blink 1s ease-in-out infinite }
+@keyframes blink { 50% { opacity: .25 } }
+.q-num { display: flex; align-items: baseline; gap: .12em; line-height: .86; min-width: 0 }
+.q-val { font-size: clamp(88px, 24cqi, 300px); font-weight: 220; font-variation-settings: "wdth" 125; letter-spacing: -.03em; font-variant-numeric: tabular-nums }
+.q-unit { font-size: clamp(16px, 2.6cqi, 28px); color: var(--mute); font-variation-settings: "wdth" 100 }
+.q-bar { height: 2px; background: var(--line); margin-top: 28px; position: relative; overflow: hidden }
+.q-bar i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent) }
+.q-actions { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-top: 22px }
+.q-go { font: inherit; font-size: 15px; font-weight: 600; background: var(--fg); color: var(--bg); border: 0; border-radius: 999px; padding: 11px 22px; cursor: pointer }
+.q-go:disabled { opacity: .35; cursor: default }
+.q-link { padding: 6px 0; color: var(--fg); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px }
+.q-sub { margin: 14px 0 0; font-size: 14px; color: var(--mute) }
+.q-t1 { display: grid; grid-template-columns: repeat(3, minmax(0, auto)); justify-content: start; gap: 18px clamp(28px, 7cqi, 80px); margin-top: 38px; padding-top: 26px; border-top: 1px solid var(--line) }
+.q-stat { display: grid; gap: 4px }
+.q-stat span { font-size: 13.5px; color: var(--mute) }
+.q-stat b { font-weight: 300; font-size: clamp(38px, 6cqi, 60px); font-variation-settings: "wdth" 125; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums }
+.q-stat b small { font-size: 15px; color: var(--mute); font-weight: 400; font-variation-settings: "wdth" 100; letter-spacing: 0; margin-left: 4px }
+.q-t1 .q-link { grid-column: 1 / -1; justify-self: start }
+.q-t2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 28px 48px; margin-top: 30px; padding-top: 26px; border-top: 1px solid var(--line) }
+.q-grade { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; align-items: center }
+.q-grade b { grid-row: span 2; font-size: 64px; font-weight: 300; font-variation-settings: "wdth" 125; line-height: 1; color: var(--accent) }
+.q-grade span { font-size: 13.5px; color: var(--mute) }
+.q-grade p { margin: 0; font-size: 14.5px; line-height: 1.45 }
+.q-t2 .kv { margin-top: 22px }
+@container stage (max-width: 640px) {
+  .q-t1 { grid-template-columns: 1fr 1fr } .q-t1 .q-stat:first-child { grid-column: 1 / -1 }
+  .q-t2 { grid-template-columns: 1fr }
+}
+
+/* =================== C · DYNO SHEET =================== */
+.v-dyno {
+  --bg: #F2F5F3; --fg: #1B2320; --mute: #5D6B66; --grid: #DCE7E2; --grid2: #C4D6CE; --red: #D3222A; --blue: #1D5BC4; --line: #B9CCC4; --paper: #FBFCFB;
+  --s-panel: #FBFCFB; --s-line: #C4D6CE; --s-mute: #5D6B66; --s-accent: #1B2320; --s-on: #FBFCFB; --s-input: #FFFFFF; --s-radius: 4px;
+  --s-font: "Chivo", system-ui, sans-serif; --s-num: "Chivo Mono", ui-monospace, monospace; --focus: #1D5BC4;
+  --c-down: #D3222A; --c-up: #1D5BC4; --c-lat: #5D6B66;
+  font-family: var(--s-font); padding: 20px max(16px, 3cqi) 36px; display: grid; gap: 18px; align-content: start;
+  background-color: var(--bg);
+  background-image: linear-gradient(var(--grid2) 1px, transparent 1px), linear-gradient(90deg, var(--grid2) 1px, transparent 1px), linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 60px 60px, 60px 60px, 12px 12px, 12px 12px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .v-dyno {
+  --bg: #0D1820; --fg: #E2EBEE; --mute: #8BA0AA; --grid: #13232C; --grid2: #1B3240; --red: #FF5A60; --blue: #6FA6FF; --line: #2A4352; --paper: #10202A;
+  --s-panel: #10202A; --s-line: #2A4352; --s-mute: #8BA0AA; --s-accent: #E2EBEE; --s-on: #0D1820; --s-input: #0D1820; --focus: #6FA6FF;
+  --c-down: #FF5A60; --c-up: #6FA6FF; --c-lat: #8BA0AA; color-scheme: dark } }
+:root[data-theme="dark"] .v-dyno {
+  --bg: #0D1820; --fg: #E2EBEE; --mute: #8BA0AA; --grid: #13232C; --grid2: #1B3240; --red: #FF5A60; --blue: #6FA6FF; --line: #2A4352; --paper: #10202A;
+  --s-panel: #10202A; --s-line: #2A4352; --s-mute: #8BA0AA; --s-accent: #E2EBEE; --s-on: #0D1820; --s-input: #0D1820; --focus: #6FA6FF;
+  --c-down: #FF5A60; --c-up: #6FA6FF; --c-lat: #8BA0AA; color-scheme: dark }
+.d-head { display: grid; grid-template-columns: auto 1fr auto; gap: 14px 30px; align-items: end; background: var(--paper); border: 1px solid var(--line); padding: 16px 18px }
+.d-title { display: grid; gap: 2px }
+.d-title span { font-size: 12.5px; color: var(--mute) }
+.d-title h2 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums }
+.d-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px 22px; margin: 0; min-width: 0 }
+.d-meta div { display: grid; gap: 2px; min-width: 0 }
+.d-meta dt { font-size: 12px; color: var(--mute) }
+.d-meta dd { margin: 0; font-family: var(--s-num); font-size: 13.5px; overflow-wrap: anywhere }
+.d-act { display: grid; gap: 8px; justify-items: end }
+.d-go { font: inherit; font-weight: 700; font-size: 15px; background: var(--red); color: #fff; border: 0; padding: 11px 20px; cursor: pointer; border-radius: 3px }
+.d-go:disabled { opacity: .45; cursor: default }
+.d-act label { font-size: 13.5px; display: flex; gap: 7px; align-items: center; cursor: pointer; color: var(--fg) }
+.d-act input { accent-color: var(--blue); width: 16px; height: 16px; margin: 0 }
+.d-body { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; align-items: start }
+.d-chart { margin: 0; background: var(--paper); border: 1px solid var(--line); padding: 12px 12px 10px; display: grid; gap: 8px; min-width: 0 }
+.d-chart svg { width: 100%; height: auto; display: block; overflow: visible }
+.dc-grid { stroke: var(--grid2); stroke-width: 1 }
+.dc-axis { fill: var(--mute); font-family: "Chivo Mono", monospace; font-size: 12px }
+.dc-down { fill: none; stroke: var(--red); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round }
+.dc-up { fill: none; stroke: var(--blue); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round }
+.dc-prev { stroke-dasharray: 5 5; stroke-width: 1.6; opacity: .55 }
+.dc-ld { fill: none; stroke: var(--red); stroke-width: 1.2; opacity: .8 }
+.dc-lu { fill: none; stroke: var(--blue); stroke-width: 1.2; opacity: .8 }
+.dc-idle { stroke: var(--fg); stroke-dasharray: 2 4; stroke-width: 1 }
+.dc-pk { font-family: "Chivo Mono", monospace; font-size: 12.5px; font-weight: 600 }
+.dc-pk.d { fill: var(--red) } .dc-pk.u { fill: var(--blue) }
+.dc-dot.d { fill: var(--red) } .dc-dot.u { fill: var(--blue) }
+.dc-band { font-family: "Chivo", sans-serif; font-size: 12px; fill: var(--mute) }
+.d-chart .legend i.dash { background: none; border-top: 2px dashed var(--s-mute); height: 0; border-radius: 0; vertical-align: 3px }
+.d-res { background: var(--paper); border: 1px solid var(--line); display: grid; }
+.d-row { display: grid; grid-template-columns: 1fr auto; align-items: baseline; padding: 12px 16px; border-bottom: 1px solid var(--line); gap: 10px }
+.d-row span { font-size: 13.5px; color: var(--mute) }
+.d-row b { font-family: var(--s-num); font-weight: 500; font-size: 15px; font-variant-numeric: tabular-nums }
+.d-row.big b { font-size: 30px; font-weight: 600; letter-spacing: -.02em }
+.d-row.big b small { font-size: 13px; font-weight: 400; color: var(--mute); margin-left: 4px; letter-spacing: 0 }
+.d-row.big.d b { color: var(--red) } .d-row.big.u b { color: var(--blue) }
+.d-res .q-link, .d-full { font: inherit; font-size: 14px; background: none; border: 0; color: var(--fg); text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--line); padding: 12px 16px; text-align: left; cursor: pointer }
+.d-more { display: flex; gap: 8px; flex-wrap: wrap }
+.d-more button { font: inherit; font-size: 14px; background: var(--paper); border: 1px solid var(--line); color: var(--fg); padding: 8px 14px; cursor: pointer; border-radius: 3px }
+.d-more button[aria-expanded="true"] { background: var(--fg); color: var(--paper); border-color: var(--fg) }
+@container stage (max-width: 760px) {
+  .d-head { grid-template-columns: 1fr auto } .d-meta { grid-column: 1 / -1; grid-row: 2 } .d-act { grid-row: 1; grid-column: 2 }
+  .d-body { grid-template-columns: 1fr }
+}
+
+@media (prefers-reduced-motion: reduce) { .t-needle { transition: none } .running .q-dot { animation: none } }
+</style>
+
+<div class="shell">
+  <div class="bar">
+    <h1>dyno <span>UI prototypes</span></h1>
+    <nav class="pick" aria-label="Design direction">
+      <a href="#tach" data-v="tach">Tach</a><a href="#quiet" data-v="quiet">Quiet</a><a href="#dyno" data-v="dyno">Dyno sheet</a>
+    </nav>
+    <span class="sp"></span>
+    <span class="tag">Simulated test, example data</span>
+    <button class="frame-t" id="frame-t" aria-pressed="false">Phone frame</button>
+  </div>
+  <p class="blurb" id="blurb"></p>
+  <div class="stage" id="stage"></div>
+</div>
+
+<script>
+"use strict";
+// ---------- simulation ----------
+const PROFILES = { quick: { label: "Quick", lat: 1.2, down: 5, up: 4 }, standard: { label: "Standard", lat: 1.6, down: 8, up: 7 }, thorough: { label: "Thorough", lat: 2.5, down: 15, up: 12 } };
+const S = { profile: "standard", streams: "auto", planDown: 1000, planUp: 500, unit: "Mbps", server: "local", schedule: "off" };
+const SERVERS = { local: "This server (dyno.local)", nas: "Basement NAS (10.0.0.4)", vps: "Cloud VPS (Frankfurt)" };
+function rng(seed) { return () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+const median = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+
+function makeRun(seed) {
+  const r = rng(seed), p = PROFILES[S.profile], dt = 0.1, pts = [];
+  const base = 7.5 + r() * 3, tD = S.planDown * (0.91 + r() * 0.06), tU = S.planUp * (0.8 + r() * 0.08);
+  const bloatD = 12 + r() * 18, bloatU = 34 + r() * 36;
+  let t = 0;
+  const push = (ph, v, ms) => { pts.push({ t: Math.round(t * 100) / 100, ph, v, ms }); t += dt; };
+  while (t < p.lat) push("latency", 0, base + (r() - 0.5) * 2.6);
+  let s = t;
+  while (t < s + p.down) { const k = 1 - Math.exp(-(t - s) / 0.65); let v = tD * k * (1 + (r() - 0.5) * 0.07); if (r() < 0.035) v *= 0.8 + r() * 0.1; push("download", v, base + bloatD * k + r() * 10); }
+  s = t;
+  while (t < s + p.up) { const k = 1 - Math.exp(-(t - s) / 0.9); let v = tU * k * (1 + (r() - 0.5) * 0.09); if (r() < 0.04) v *= 0.78 + r() * 0.1; push("upload", v, base + bloatU * k + r() * 18); }
+  return { pts, total: t, durs: p, when: new Date(), no: 0 };
+}
+function gradeFor(d) { return d < 5 ? "A+" : d < 30 ? "A" : d < 60 ? "B" : d < 200 ? "C" : d < 400 ? "D" : "F"; }
+const GRADE_TEXT = {
+  "A+": "No slowdown when the line is busy. Calls and games stay smooth during big downloads.",
+  A: "Barely any slowdown when the line is busy. Calls and games stay smooth.",
+  B: "Some slowdown when the line is busy. A video call may stutter while someone uploads a big file.",
+  C: "Noticeable lag when the line is busy. Turning on smart queue management (SQM) in your router usually fixes this.",
+  D: "Heavy lag when the line is busy. Turn on smart queue management (SQM) in your router.",
+  F: "Severe lag when the line is busy. Calls and games will suffer. Turn on SQM in your router."
+};
+function summarize(run, upto = run.pts.length) {
+  const sl = run.pts.slice(0, upto), by = ph => sl.filter(p => p.ph === ph);
+  const L = by("latency"), D = by("download"), U = by("upload");
+  const speed = a => { if (!a.length) return null; const t0 = a[0].t, st = a.filter(p => p.t - t0 > 1.2); return mean((st.length > 3 ? st : a.slice(-3)).map(p => p.v)); };
+  const idle = L.length ? median(L.map(p => p.ms)) : null;
+  const jitter = L.length > 1 ? mean(L.slice(1).map((p, i) => Math.abs(p.ms - L[i].ms))) : null;
+  const ldown = D.length ? median(D.map(p => p.ms)) : null, lup = U.length ? median(U.map(p => p.ms)) : null;
+  const done = upto >= run.pts.length;
+  return { idle, jitter, ldown, lup, down: speed(D), up: speed(U), loss: 0, grade: done ? gradeFor(Math.max(ldown, lup) - idle) : null,
+    peakDown: D.length ? Math.max(...D.map(p => p.v)) : null, peakUp: U.length ? Math.max(...U.map(p => p.v)) : null };
+}
+
+// ---------- app state ----------
+const A = { status: "done", view: "tach", t0: 0, elapsed: 0, open: null, tier: 0, full: false, overlay: true, runNo: 142 };
+A.prev = makeRun(11); A.prev.no = 141; A.prev.when = new Date(2026, 9, 30, 8, 0);
+A.run = makeRun(42); A.run.no = 142; A.run.when = new Date(2026, 9, 30, 14, 7);
+A.elapsed = A.run.total;
+
+function snap() {
+  const run = A.run; let i = run.pts.findIndex(p => p.t > A.elapsed); if (i < 0) i = run.pts.length;
+  const cur = run.pts[i - 1], phase = A.status === "done" ? "done" : cur ? cur.ph : "latency";
+  const recent = run.pts.slice(Math.max(0, i - 4), i).filter(p => p.ph === phase);
+  const live = phase === "latency" ? (cur ? cur.ms : null) : recent.length ? mean(recent.map(p => p.v)) : 0;
+  return { status: A.status, phase, i, run, res: summarize(run, i), live, progress: Math.min(1, A.elapsed / run.total) };
+}
+function start() {
+  if (A.status === "running") return;
+  A.prev = A.run; A.run = makeRun((Math.random() * 1e9) | 0); A.run.no = ++A.runNo;
+  A.status = "running"; A.t0 = performance.now(); A.elapsed = 0; tick();
+}
+function tick() {
+  A.elapsed = (performance.now() - A.t0) / 1000;
+  if (A.elapsed >= A.run.total) { A.elapsed = A.run.total; A.status = "done"; }
+  render();
+  if (A.status === "running") requestAnimationFrame(tick);
+}
+
+// ---------- formatting ----------
+const unit = () => (S.unit === "MBps" ? "MB/s" : "Mbps");
+function fmt(v) { if (v == null || isNaN(v)) return "–"; if (S.unit === "MBps") v /= 8; return v >= 100 ? Math.round(v).toLocaleString("en-US") : v >= 10 ? v.toFixed(0) : v.toFixed(1); }
+const fms = v => (v == null ? "–" : v < 10 ? v.toFixed(1) : String(Math.round(v)));
+const fdate = d => d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const PHASE = { latency: "Latency", download: "Download", upload: "Upload", done: "Download" };
+
+// ---------- shared panels ----------
+const HIST = [
+  ["Oct 30, 2:07 PM", 938, 412, 9.1, "B", "This browser, wired"],
+  ["Oct 30, 8:00 AM", 941, 418, 8.4, "A", "Scheduled"],
+  ["Oct 29, 8:00 PM", 612, 401, 11.2, "B", "Scheduled"],
+  ["Oct 29, 2:00 PM", 935, 410, 8.9, "A", "Scheduled"],
+  ["Oct 28, 9:13 PM", 287, 96, 24.0, "C", "Pixel 9, bedroom Wi-Fi"],
+  ["Oct 28, 8:00 AM", 940, 420, 8.2, "A", "Scheduled"]
+];
+function setupPanel() {
+  const seg = (name, opts, cur) => `<div class="seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" id="${name}-${v}" value="${v}"${cur === v ? " checked" : ""}><span>${l}</span></label>`).join("")}</div>`;
+  const opt = (o, cur) => Object.entries(o).map(([v, l]) => `<option value="${v}"${cur === v ? " selected" : ""}>${l}</option>`).join("");
+  return `<h3>Test setup</h3>
+  <div class="setgrid">
+    <div class="field"><label for="set-server">Server</label><select id="set-server">${opt(SERVERS, S.server)}</select><p class="note">Run more dyno containers to test between rooms, sites or a VPS.</p></div>
+    <fieldset class="field"><legend>Test length</legend>${seg("set-prof", Object.entries(PROFILES).map(([k, p]) => [k, p.label]), S.profile)}<p class="note">Quick takes about 10 seconds, Thorough about 30. Applies to the next test.</p></fieldset>
+    <div class="field"><label for="set-streams">Parallel connections</label><select id="set-streams">${opt({ auto: "Auto (recommended)", 1: "1", 4: "4", 8: "8", 16: "16" }, S.streams)}</select><p class="note">Auto adds connections until the speed stops climbing.</p></div>
+    <div class="field"><label for="set-plan">Your plan, down and up (Mbps)</label><div class="pair"><input type="number" id="set-plan" min="1" value="${S.planDown}" aria-label="Plan download Mbps"><input type="number" id="set-planup" min="1" value="${S.planUp}" aria-label="Plan upload Mbps"></div><p class="note">Lets dyno tell you whether you get what you pay for.</p></div>
+    <fieldset class="field"><legend>Units</legend>${seg("set-unit", [["Mbps", "Mbps"], ["MBps", "MB/s"]], S.unit)}</fieldset>
+    <div class="field"><label for="set-sched">Automatic tests</label><select id="set-sched">${opt({ off: "Off", h1: "Every hour", h6: "Every 6 hours", d1: "Daily at 3:00 AM" }, S.schedule)}</select><p class="note">The server runs these on its own and keeps them in History.</p></div>
+  </div>
+  <div class="exp"><button class="sbtn" data-copy="json">Copy result as JSON</button><button class="sbtn" data-copy="prom">Copy Prometheus URL</button><span class="note" aria-live="polite" data-copied></span></div>`;
+}
+function historyPanel() {
+  return `<h3>History</h3><div class="tw"><table class="hist"><thead><tr><th>When</th><th>Down (${unit()})</th><th>Up (${unit()})</th><th>Latency</th><th>Grade</th><th>From</th></tr></thead><tbody>${
+    HIST.map(h => `<tr><td>${h[0]}</td><td class="n">${fmt(h[1])}</td><td class="n">${fmt(h[2])}</td><td class="n">${h[3]} ms</td><td>${h[4]}</td><td>${h[5]}</td></tr>`).join("")
+  }</tbody></table></div><p class="note">Example runs. Scheduled rows come from the server; the rest from browsers and phones that ran a test.</p>`;
+}
+function detailRows(r) {
+  return `<dl class="kv">
+    <dt>Idle latency</dt><dd>${fms(r.idle)} ms</dd>
+    <dt>Latency while downloading</dt><dd>${fms(r.ldown)} ms</dd>
+    <dt>Latency while uploading</dt><dd>${fms(r.lup)} ms</dd>
+    <dt>Jitter</dt><dd>${fms(r.jitter)} ms</dd>
+    <dt>Packet loss</dt><dd>${r.idle == null ? "–" : r.loss.toFixed(1) + "%"}</dd>
+    <dt>Connections</dt><dd>${S.streams === "auto" ? "6, auto" : S.streams}</dd>
+    <dt>Server</dt><dd>${SERVERS[S.server].replace(/ \(.*/, "")}</dd></dl>`;
+}
+function timelineSVG(run, i) {
+  const W = 600, H = 120, T = run.total;
+  const maxV = Math.max(S.planDown, ...run.pts.map(p => p.v)) * 1.05, maxMs = Math.max(60, ...run.pts.map(p => p.ms)) * 1.15;
+  const x = t => ((t / T) * W).toFixed(1), y = v => (H - (v / maxV) * (H - 4)).toFixed(1);
+  const sl = run.pts.slice(0, i);
+  const area = ph => { const a = sl.filter(p => p.ph === ph); return a.length < 2 ? "" : `M${x(a[0].t)} ${H} ` + a.map(p => `L${x(p.t)} ${y(p.v)}`).join(" ") + ` L${x(a[a.length - 1].t)} ${H}Z`; };
+  const lat = sl.map((p, j) => `${j ? "L" : "M"}${x(p.t)} ${(H - (p.ms / maxMs) * (H - 4)).toFixed(1)}`).join(" ");
+  return `<svg class="tl" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Speed and latency over the test"><path class="tl-d" d="${area("download")}"/><path class="tl-u" d="${area("upload")}"/><path class="tl-l" d="${lat}"/></svg>
+  <ul class="legend"><li><i style="background:var(--c-down)"></i>Download</li><li><i style="background:var(--c-up)"></i>Upload</li><li><i style="background:var(--c-lat)"></i>Latency</li></ul>`;
+}
+function resultJSON() {
+  const r = summarize(A.run);
+  return JSON.stringify({ run: A.run.no, at: A.run.when.toISOString(), server: S.server, download_mbps: +r.down.toFixed(1), upload_mbps: +r.up.toFixed(1), idle_ms: +r.idle.toFixed(1), loaded_down_ms: +r.ldown.toFixed(1), loaded_up_ms: +r.lup.toFixed(1), jitter_ms: +r.jitter.toFixed(2), packet_loss_pct: 0, bufferbloat_grade: r.grade }, null, 2);
+}
+function bindShared(root) {
+  root.addEventListener("change", e => {
+    const t = e.target;
+    if (t.name === "set-prof") S.profile = t.value;
+    else if (t.name === "set-unit") { S.unit = t.value; render(); refreshPanels(root); }
+    else if (t.id === "set-streams") S.streams = t.value;
+    else if (t.id === "set-server") S.server = t.value;
+    else if (t.id === "set-sched") S.schedule = t.value;
+    else if (t.id === "set-plan") { S.planDown = Math.max(1, +t.value || 1000); mount(); }
+    else if (t.id === "set-planup") S.planUp = Math.max(1, +t.value || 500);
+  });
+  root.addEventListener("click", async e => {
+    const b = e.target.closest("[data-copy]"); if (!b) return;
+    const text = b.dataset.copy === "json" ? resultJSON() : "http://dyno.local:8080/metrics";
+    const out = b.parentElement.querySelector("[data-copied]");
+    try { await navigator.clipboard.writeText(text); out.textContent = "Copied"; }
+    catch { out.textContent = text.length < 60 ? text : "Copy blocked here. The full result is in History."; }
+  });
+}
+function refreshPanels(root) {
+  const h = root.querySelector('[data-panel="history"]'); if (h && !h.hidden) h.innerHTML = historyPanel();
+}
+function wireToggles(root) {
+  const sync = () => root.querySelectorAll("[data-toggle]").forEach(b => {
+    const on = A.open === b.dataset.toggle; b.setAttribute("aria-expanded", on);
+    const p = root.querySelector(`[data-panel="${b.dataset.toggle}"]`); if (p) p.hidden = !on;
+    if (on && p && p.dataset.panel === "history") p.innerHTML = historyPanel();
+  });
+  root.addEventListener("click", e => { const b = e.target.closest("[data-toggle]"); if (!b) return; A.open = A.open === b.dataset.toggle ? null : b.dataset.toggle; sync(); render(); });
+  sync();
+}
+
+// =================== view A: Tach ===================
+const DMIN = 1, DMAX = 10000;
+const ang = v => -120 + 240 * Math.min(1, Math.max(0, Math.log10(Math.max(v, DMIN)) / 4));
+function polar(r, deg) { const a = ((deg - 90) * Math.PI) / 180; return [200 + r * Math.cos(a), 200 + r * Math.sin(a)]; }
+function arc(r, a0, a1) { const [x0, y0] = polar(r, a0), [x1, y1] = polar(r, a1); return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; }
+function dialSVG() {
+  let ticks = "", labels = "";
+  for (let d = 0; d <= 4; d++) for (let m = 1; m <= 9; m++) {
+    const v = m * 10 ** d; if (v > DMAX) break;
+    const a = ang(v), major = m === 1, mid = m === 5;
+    const [x0, y0] = polar(major ? 132 : mid ? 144 : 150, a), [x1, y1] = polar(162, a);
+    ticks += `<line class="tick${major ? "" : " minor"}" x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke-width="${major ? 7 : mid ? 3.5 : 2}"/>`;
+    if (major) { const [lx, ly] = polar(110, a); labels += `<text class="lab" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}">${["1", "10", "100", "1G", "10G"][d]}</text>`; }
+  }
+  const red0 = ang(S.planDown);
+  return `<svg class="t-dial" viewBox="0 0 400 400" role="img" aria-label="Speed dial">
+    <circle cx="200" cy="200" r="194" fill="#D8DBE0"/><circle cx="200" cy="200" r="186" fill="#0B0D11"/>
+    <circle cx="200" cy="200" r="182" fill="var(--face)"/>
+    <path d="${arc(166, red0, 120)}" stroke="var(--red)" stroke-width="12" fill="none"/>
+    ${ticks}${labels}
+    <path class="t-prog" d="${arc(176, -120, 120)}" pathLength="1" stroke-dasharray="0 1"/>
+    <text class="t-phase" x="200" y="282" id="t-phase">DOWNLOAD</text>
+    <text class="t-val" x="200" y="346" id="t-val">0</text>
+    <text class="t-unit" x="200" y="372" id="t-unit">Mbps</text>
+    <g class="t-needle" id="t-needle"><path d="M196 214 L198.6 52 Q200 46 201.4 52 L204 214 Z" fill="var(--needle)"/><circle cx="200" cy="200" r="16" fill="#0B0D11" stroke="var(--needle)" stroke-width="3"/></g>
+  </svg>`;
+}
+const Tach = {
+  mount(el) {
+    el.innerHTML = `<div class="v v-tach">
+      <header class="t-top"><span class="t-brand">DYNO<b>/</b></span><span>${SERVERS[S.server]}</span></header>
+      <div class="t-dialwrap">${dialSVG()}<button class="t-start" id="t-start" aria-label="Start test">START<small>TEST</small></button></div>
+      <div class="t-read">
+        <div class="t-cell" data-c="download"><span>Download</span><b id="t-d">–</b><em>${unit()}</em></div>
+        <div class="t-cell" data-c="upload"><span>Upload</span><b id="t-u">–</b><em>${unit()}</em></div>
+        <div class="t-cell" data-c="latency"><span>Latency</span><b id="t-l">–</b><em>ms idle</em></div>
+      </div>
+      <div class="t-more"><button data-toggle="details">Telemetry</button><button data-toggle="setup">Setup</button><button data-toggle="history">History</button></div>
+      <section class="pnl" data-panel="details" hidden></section>
+      <section class="pnl" data-panel="setup" hidden>${setupPanel()}</section>
+      <section class="pnl" data-panel="history" hidden></section>
+    </div>`;
+    const root = el.firstElementChild;
+    root.querySelector("#t-start").onclick = start;
+    bindShared(root); wireToggles(root);
+  },
+  render(s, el) {
+    const q = id => el.querySelector(id), r = s.res, running = s.status === "running";
+    const needleV = s.phase === "download" || s.phase === "upload" ? s.live : s.phase === "done" ? r.down : 0;
+    q("#t-needle").style.transform = `rotate(${ang(needleV)}deg)`;
+    q(".t-prog").setAttribute("stroke-dasharray", `${running ? s.progress : 0} 1`);
+    q("#t-start").hidden = running;
+    q("#t-phase").textContent = (s.phase === "done" ? "DOWNLOAD" : PHASE[s.phase].toUpperCase());
+    q("#t-val").textContent = s.phase === "latency" ? fms(s.live) : fmt(s.phase === "done" ? r.down : s.live);
+    q("#t-unit").textContent = s.phase === "latency" ? "ms" : unit();
+    q("#t-d").textContent = s.phase === "download" ? fmt(s.live) : fmt(r.down);
+    q("#t-u").textContent = s.phase === "upload" ? fmt(s.live) : fmt(r.up);
+    q("#t-l").textContent = fms(r.idle);
+    el.querySelectorAll(".t-cell").forEach(c => c.classList.toggle("on", running && c.dataset.c === s.phase));
+    const d = q('[data-panel="details"]');
+    if (!d.hidden) d.innerHTML = `<h3>Telemetry</h3><div class="t-tele">
+      <div class="gradebox"><span class="grade">${r.grade || "…"}</span><p>${r.grade ? "Bufferbloat grade. " + GRADE_TEXT[r.grade] : "Grade appears when the test finishes."}</p></div>
+      <div style="display:grid;gap:18px;min-width:0">${detailRows(r)}${timelineSVG(s.run, s.i)}</div></div>`;
+  }
+};
+
+// =================== view B: Quiet ===================
+const Quiet = {
+  mount(el) {
+    el.innerHTML = `<div class="v v-quiet">
+      <header class="q-top"><span class="q-brand">dyno</span><nav><button data-toggle="history">History</button><button data-toggle="setup">Settings</button></nav></header>
+      <div class="q-pnls"><section class="pnl" data-panel="setup" hidden>${setupPanel()}</section><section class="pnl" data-panel="history" hidden></section></div>
+      <main class="q-main">
+        <p class="q-label"><span class="q-dot"></span><span id="q-lab">Your download speed</span></p>
+        <div class="q-num"><span class="q-val" id="q-val">0</span><span class="q-unit" id="q-unit">Mbps</span></div>
+        <div class="q-bar"><i id="q-bar"></i></div>
+        <div class="q-actions"><button class="q-go" id="q-go">Test again</button><button class="q-link" id="q-r1" aria-expanded="false">Show upload and latency</button></div>
+        <p class="q-sub" id="q-sub" hidden></p>
+        <div class="q-t1" id="q-t1" hidden>
+          <div class="q-stat"><span>Upload</span><b><span id="q-u">–</span><small>${unit()}</small></b></div>
+          <div class="q-stat"><span>Latency, idle</span><b><span id="q-li">–</span><small>ms</small></b></div>
+          <div class="q-stat"><span>Latency, busy line</span><b><span id="q-lb">–</span><small>ms</small></b></div>
+          <button class="q-link" id="q-r2" aria-expanded="false">More details</button>
+        </div>
+        <div class="q-t2" id="q-t2" hidden></div>
+      </main></div>`;
+    const root = el.firstElementChild;
+    root.querySelector("#q-go").onclick = start;
+    root.querySelector("#q-r1").onclick = () => { A.tier = A.tier ? 0 : 1; render(); };
+    root.querySelector("#q-r2").onclick = () => { A.tier = A.tier === 2 ? 1 : 2; render(); };
+    bindShared(root); wireToggles(root);
+  },
+  render(s, el) {
+    const q = id => el.querySelector(id), r = s.res, running = s.status === "running";
+    el.firstElementChild.classList.toggle("running", running);
+    const showDownLive = s.phase === "download";
+    q("#q-lab").textContent = s.phase === "latency" ? "Connecting" : showDownLive ? "Measuring download speed" : "Your download speed";
+    q("#q-val").textContent = s.phase === "latency" ? "0" : fmt(showDownLive ? s.live : r.down);
+    q("#q-unit").textContent = unit();
+    q("#q-bar").style.width = (running ? s.progress * 100 : 0) + "%";
+    q("#q-go").disabled = running; q("#q-go").textContent = running ? "Testing…" : "Test again";
+    q("#q-r1").textContent = A.tier ? "Hide upload and latency" : "Show upload and latency";
+    q("#q-r1").setAttribute("aria-expanded", A.tier > 0);
+    q("#q-sub").hidden = !(running && s.phase === "upload" && !A.tier);
+    q("#q-sub").textContent = `Measuring upload: ${fmt(s.live)} ${unit()}`;
+    q("#q-t1").hidden = !A.tier;
+    q("#q-u").textContent = s.phase === "upload" ? fmt(s.live) : fmt(r.up);
+    q("#q-li").textContent = fms(r.idle);
+    q("#q-lb").textContent = fms(r.lup != null ? Math.max(r.ldown, r.lup) : r.ldown);
+    q("#q-r2").textContent = A.tier === 2 ? "Fewer details" : "More details";
+    q("#q-r2").setAttribute("aria-expanded", A.tier === 2);
+    const t2 = q("#q-t2"); t2.hidden = A.tier !== 2;
+    if (A.tier === 2) t2.innerHTML = `<div><div class="q-grade"><b>${r.grade || "…"}</b><span>Bufferbloat grade</span><p>${r.grade ? GRADE_TEXT[r.grade] : "Appears when the test finishes."}</p></div>${detailRows(r)}</div><div style="display:grid;gap:10px;align-content:start;min-width:0">${timelineSVG(s.run, s.i)}</div>`;
+  }
+};
+
+// =================== view C: Dyno sheet ===================
+function dynoSVG(run, i, prev, overlay) {
+  const W = 800, X0 = 58, X1 = 786, Y0 = 18, Y1 = 290, B0 = 326, B1 = 410;
+  const maxDur = Math.max(run.durs.down, run.durs.up);
+  const allV = run.pts.map(p => p.v).concat(overlay && prev ? prev.pts.map(p => p.v) : []);
+  const rawMax = Math.max(S.planDown, ...allV) * 1.08;
+  const step = [50, 100, 200, 250, 500, 1000, 2000, 2500, 5000].find(s => rawMax / s <= 6) || 5000;
+  const vMax = Math.ceil(rawMax / step) * step;
+  const msMax = Math.max(80, ...run.pts.map(p => p.ms)) * 1.1;
+  const x = t => X0 + (t / maxDur) * (X1 - X0), y = v => Y1 - (v / vMax) * (Y1 - Y0), yb = ms => B1 - (ms / msMax) * (B1 - B0);
+  let g = "";
+  for (let v = 0; v <= vMax; v += step) g += `<line class="dc-grid" x1="${X0}" x2="${X1}" y1="${y(v)}" y2="${y(v)}"/><text class="dc-axis" x="${X0 - 8}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`;
+  const xs = maxDur > 10 ? 2 : 1;
+  for (let t = 0; t <= maxDur + 0.01; t += xs) g += `<line class="dc-grid" x1="${x(t)}" x2="${x(t)}" y1="${Y0}" y2="${Y1}" opacity=".6"/><text class="dc-axis" x="${x(t)}" y="${Y1 + 17}" text-anchor="middle">${t}s</text>`;
+  g += `<text class="dc-axis" x="${X0 - 8}" y="${Y0 - 6}" text-anchor="end">${unit()}</text>`;
+  const series = (r, ph, upto) => { const a = r.pts.slice(0, upto).filter(p => p.ph === ph); if (!a.length) return { a, d: "" }; const t0 = a[0].t - 0.1; return { a, t0, d: a.map((p, j) => `${j ? "L" : "M"}${x(p.t - t0).toFixed(1)} ${y(p.v).toFixed(1)}`).join(" ") }; };
+  const band = (r, ph, upto) => { const a = r.pts.slice(0, upto).filter(p => p.ph === ph); if (!a.length) return ""; const t0 = a[0].t - 0.1; return a.map((p, j) => `${j ? "L" : "M"}${x(p.t - t0).toFixed(1)} ${yb(p.ms).toFixed(1)}`).join(" "); };
+  let curves = "";
+  if (overlay && prev) { curves += `<path class="dc-down dc-prev" d="${series(prev, "download").d}"/><path class="dc-up dc-prev" d="${series(prev, "upload").d}"/>`; }
+  const D = series(run, "download", i), U = series(run, "upload", i);
+  curves += `<path class="dc-down" d="${D.d}"/><path class="dc-up" d="${U.d}"/>`;
+  const peak = (s, cls, done) => { if (!done || !s.a.length) return ""; const p = s.a.reduce((m, q) => (q.v > m.v ? q : m)); const px = x(p.t - s.t0), py = y(p.v); const anchor = px > X1 - 150 ? "end" : "start"; return `<circle class="dc-dot ${cls}" cx="${px}" cy="${py}" r="4"/><text class="dc-pk ${cls}" x="${px + (anchor === "end" ? -8 : 8)}" y="${py - 8}" text-anchor="${anchor}">Peak ${fmt(p.v)}</text>`; };
+  const dDone = i > 0 && run.pts.slice(0, i).some(p => p.ph === "upload") || i >= run.pts.length, uDone = i >= run.pts.length;
+  curves += peak(D, "d", dDone) + peak(U, "u", uDone);
+  const L = run.pts.slice(0, i).filter(p => p.ph === "latency"); const idle = L.length ? median(L.map(p => p.ms)) : null;
+  let b = `<line class="dc-grid" x1="${X0}" x2="${X1}" y1="${B1}" y2="${B1}"/><line class="dc-grid" x1="${X0}" x2="${X1}" y1="${B0}" y2="${B0}" opacity=".5"/>
+    <text class="dc-band" x="${X0}" y="${B0 - 8}">Latency during each pull</text><text class="dc-axis" x="${X0 - 8}" y="${B0 + 4}" text-anchor="end">${Math.round(msMax)}</text><text class="dc-axis" x="${X0 - 8}" y="${B1 + 4}" text-anchor="end">0ms</text>`;
+  if (idle != null) b += `<line class="dc-idle" x1="${X0}" x2="${X1}" y1="${yb(idle)}" y2="${yb(idle)}"/><text class="dc-axis" x="${X1}" y="${yb(idle) - 5}" text-anchor="end">idle ${fms(idle)} ms</text>`;
+  b += `<path class="dc-ld" d="${band(run, "download", i)}"/><path class="dc-lu" d="${band(run, "upload", i)}"/>`;
+  return `<svg viewBox="0 0 ${W} 420" role="img" aria-label="Download and upload speed over each pull, with latency below">${g}${curves}${b}</svg>`;
+}
+const Dyno = {
+  mount(el) {
+    el.innerHTML = `<div class="v v-dyno">
+      <header class="d-head">
+        <div class="d-title"><span>dyno</span><h2 id="d-no">Run 0142</h2></div>
+        <dl class="d-meta"><div><dt>Date</dt><dd id="d-when"></dd></div><div><dt>Server</dt><dd>${SERVERS[S.server].replace(/ \(.*/, "")}</dd></div><div><dt>Client</dt><dd>This browser</dd></div><div><dt>Test length</dt><dd>${PROFILES[S.profile].label}, ${S.streams === "auto" ? "auto" : S.streams} conn.</dd></div></dl>
+        <div class="d-act"><button class="d-go" id="d-go">Start run</button><label><input type="checkbox" id="d-ov"${A.overlay ? " checked" : ""}> Overlay previous run</label></div>
+      </header>
+      <div class="d-body">
+        <figure class="d-chart"><div id="d-svg"></div>
+          <ul class="legend"><li><i style="background:var(--red)"></i>Download</li><li><i style="background:var(--blue)"></i>Upload</li><li id="d-lg-prev"><i class="dash"></i><span id="d-prevlab">Previous run</span></li></ul></figure>
+        <aside class="d-res">
+          <div class="d-row big d"><span>Download</span><b><span id="d-d">–</span><small>${unit()}</small></b></div>
+          <div class="d-row big u"><span>Upload</span><b><span id="d-u">–</span><small>${unit()}</small></b></div>
+          <div class="d-row"><span>Idle latency</span><b id="d-li">–</b></div>
+          <div id="d-fullrows"></div>
+          <button class="d-full" id="d-full" aria-expanded="false">Full sheet</button>
+        </aside>
+      </div>
+      <div class="d-more"><button data-toggle="setup">Setup</button><button data-toggle="history">History</button></div>
+      <section class="pnl" data-panel="setup" hidden>${setupPanel()}</section>
+      <section class="pnl" data-panel="history" hidden></section>
+    </div>`;
+    const root = el.firstElementChild;
+    root.querySelector("#d-go").onclick = start;
+    root.querySelector("#d-ov").onchange = e => { A.overlay = e.target.checked; render(); };
+    root.querySelector("#d-full").onclick = () => { A.full = !A.full; render(); };
+    bindShared(root); wireToggles(root);
+  },
+  render(s, el) {
+    const q = id => el.querySelector(id), r = s.res, running = s.status === "running";
+    q("#d-no").textContent = "Run " + String(s.run.no).padStart(4, "0");
+    q("#d-when").textContent = fdate(s.run.when);
+    q("#d-go").disabled = running; q("#d-go").textContent = running ? (s.phase === "latency" ? "Measuring latency" : "Pulling " + s.phase) : "Start run";
+    q("#d-svg").innerHTML = dynoSVG(s.run, s.i, A.prev, A.overlay);
+    q("#d-lg-prev").hidden = !A.overlay;
+    q("#d-prevlab").textContent = "Run " + String(A.prev.no).padStart(4, "0");
+    q("#d-d").textContent = s.phase === "download" ? fmt(s.live) : fmt(r.down);
+    q("#d-u").textContent = s.phase === "upload" ? fmt(s.live) : fmt(r.up);
+    q("#d-li").textContent = fms(r.idle) + " ms";
+    q("#d-full").textContent = A.full ? "Short sheet" : "Full sheet"; q("#d-full").setAttribute("aria-expanded", A.full);
+    const pr = summarize(A.prev), delta = (a, b) => (a == null || b == null ? "" : ` (${a >= b ? "+" : "−"}${fmt(Math.abs(a - b))})`);
+    q("#d-fullrows").innerHTML = A.full ? [
+      ["Latency, downloading", fms(r.ldown) + " ms"], ["Latency, uploading", fms(r.lup) + " ms"], ["Jitter", fms(r.jitter) + " ms"],
+      ["Packet loss", r.idle == null ? "–" : "0.0%"], ["Bufferbloat grade", r.grade || "–"], ["Peak download", fmt(r.peakDown)], ["Peak upload", fmt(r.peakUp)],
+      ["vs. previous, down", r.down == null ? "–" : fmt(r.down) + delta(r.down, pr.down)], ["vs. previous, up", r.up == null ? "–" : fmt(r.up) + delta(r.up, pr.up)]
+    ].map(([k, v]) => `<div class="d-row"><span>${k}</span><b>${v}</b></div>`).join("") : "";
+  }
+};
+
+// ---------- shell ----------
+const VIEWS = { tach: Tach, quiet: Quiet, dyno: Dyno };
+const BLURB = {
+  tach: "Tach: the Redline Labs dash. One press of the start button sweeps a log-scale tachometer, and the red zone begins at the plan speed you pay for. Telemetry, setup and history sit behind three buttons.",
+  quiet: "Quiet: closest to fast.com. One number, nothing else, until you ask. Each link reveals one more layer: upload and latency, then the bufferbloat grade and a timeline.",
+  dyno: "Dyno sheet: the result as a dyno printout. Download and upload are drawn as two pulls on graph paper with latency underneath, and the last run overlaid for comparison. For people who want the chart first."
+};
+const stage = document.getElementById("stage");
+function mount() { VIEWS[A.view].mount(stage); render(); }
+function render() { VIEWS[A.view].render(snap(), stage); }
+function route() {
+  const h = location.hash.slice(1); A.view = VIEWS[h] ? h : "tach"; A.open = null;
+  document.querySelectorAll(".pick a").forEach(a => (a.dataset.v === A.view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+  document.getElementById("blurb").textContent = BLURB[A.view];
+  mount();
+}
+const ft = document.getElementById("frame-t");
+ft.onclick = () => { const on = ft.getAttribute("aria-pressed") !== "true"; ft.setAttribute("aria-pressed", on); stage.classList.toggle("phone", on); };
+addEventListener("hashchange", route);
+route();
+</script>

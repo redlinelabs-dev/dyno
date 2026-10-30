@@ -1,0 +1,64 @@
+# Roadmap
+
+Milestones run in order. Each ends on a check you can run, not on a feeling.
+Before starting one, ask the owner the decisions-pending items listed under
+"Needs".
+
+## M0. Research and prototypes (done 2026-10-30)
+
+Brief, three research docs, a runtime benchmark, two rounds of UI prototypes,
+and ADRs 0001–0003.
+
+## M1. Walking skeleton
+
+Needs: #3 (Rust confirmed).
+
+- A `server/` Rust crate serving `/dl`, `/ul`, `/ping`, `/api/v1/plan` and
+  one embedded static page, following ADR-0002's hot-path rules.
+- A root `Makefile` with `make check` (fmt, clippy, tests, footprint check) and
+  `make bench`.
+- A footprint check, adapted from `bench/`, that fails when any ADR-0001 budget
+  is exceeded.
+- A `Dockerfile` (`FROM scratch`, non-root, static musl, amd64 and arm64) and a
+  `compose.yaml` that starts dyno with no other files.
+
+Done when `make check` passes here, the footprint check reports every
+budget met, and the image builds on a machine with Docker. Building the image
+is the owner's step until CI exists; give exact commands.
+
+## M2. Web UI v1
+
+Needs: #1 (Tach variation), #9 (auth default), #11 (branding).
+
+- `web/` in TypeScript with no framework, built by Bun and embedded in the
+  binary. It matches the chosen prototype, including the phone layout.
+- Real measurement per ADR-0003: download, upload, idle and loaded latency,
+  jitter, bufferbloat grade, and the client-CPU-limited label.
+- The telemetry layer: latency detail, speed over time, setup, history.
+- Results stored in SQLite and listed through the API. JSON copy works.
+
+Done when a full test runs from Chrome and Safari on a phone and a desktop
+against the container, the numbers agree with `iperf3` on the same LAN path
+to within 5%, and the first screen shows only start, the number and latency.
+
+## M3. Monitoring
+
+Needs: #4 (scope of scheduled tests).
+
+- Scheduled node-to-node tests (a second dyno as the far end), history charts
+  with min, max and average, and configurable retention.
+- `/metrics` for Prometheus, and alerts through webhook, ntfy or Apprise.
+- The self-check warnings from ADR-0003 §8.
+
+## M4. Public release
+
+Needs: #2 (name), #6 (licence), #7 (visibility).
+
+- Licence files, contributor licence agreement, README for r/selfhosted.
+- Fleet CI baseline (`JimmayVV/fleet-ci`), multi-arch images on GHCR.
+- A footprint report from a real Raspberry Pi.
+
+## Later
+
+Packet loss over WebTransport (#5), a multi-node fleet view, an iOS app (#10),
+a CLI client, white-label and SSO for pro (#6).

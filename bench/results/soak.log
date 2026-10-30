@@ -1,0 +1,6 @@
+[02:52:42] soak: 600s, servers in parallel on their own cores, clients on 7-9
+[03:02:48] go slope 50.0 KiB/min (after 2m -5.0) rss 8992->14800 {}
+[03:02:48] rust-mt slope 79.8 KiB/min (after 2m 32.3) rss 3908->7988 {}
+[03:02:48] rust-ct slope 6.8 KiB/min (after 2m -4.7) rss 3772->5652 {}
+[03:02:48] zig slope 38.5 KiB/min (after 2m 10.7) rss 1892->7684 {}
+[03:02:48] bun slope 14716.1 KiB/min (after 2m 15064.0) rss 20428->188400 {"abort_ul":40}

@@ -1,0 +1,9 @@
+# build outputs and caches (rebuilt by `bun run.ts build`)
+bin/
+.cache/
+servers/rust/target/
+servers/zig/.zig-cache/
+servers/zig/zig-out/
+# copies of static/index.html made at build time (go:embed / @embedFile need them in-package)
+servers/go/index.html
+servers/zig/src/index.html

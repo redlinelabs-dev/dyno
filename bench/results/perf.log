@@ -1,0 +1,150 @@
+[02:30:17] go 1 dl c=1 32.3 Gbit/s 0.266 cpu-s/GB peak 12044 KiB err 0
+[02:30:25] go 1 dl c=8 88.9 Gbit/s 0.352 cpu-s/GB peak 14340 KiB err 0
+[02:30:33] go 1 dl c=32 90.4 Gbit/s 0.340 cpu-s/GB peak 14380 KiB err 0
+[02:30:45] go 1 dl paced 1G 1.00 Gbit/s 3.6% cpu
+[02:30:53] go 1 ul c=1 34.3 Gbit/s 0.191 cpu-s/GB peak 14020 KiB err 0
+[02:31:01] go 1 ul c=8 110.9 Gbit/s 0.201 cpu-s/GB peak 14328 KiB err 0
+[02:31:09] go 1 ul c=32 93.3 Gbit/s 0.246 cpu-s/GB peak 18980 KiB err 0
+[02:31:21] go 1 ul paced 1G 1.00 Gbit/s 4.6% cpu
+[02:31:30] go 1 ping p50/p99 idle 65/120 us, loaded 76/15364 us
+[02:31:39] go 1 churn 19673 conn/s, err 0, rss 14852->14964 KiB, threads 21->21
+[02:31:47] rust-mt 1 dl c=1 37.2 Gbit/s 0.214 cpu-s/GB peak 4044 KiB err 0
+[02:31:55] rust-mt 1 dl c=8 96.2 Gbit/s 0.332 cpu-s/GB peak 4200 KiB err 0
+[02:32:03] rust-mt 1 dl c=32 98.6 Gbit/s 0.324 cpu-s/GB peak 4520 KiB err 0
+[02:32:15] rust-mt 1 dl paced 1G 1.00 Gbit/s 3.2% cpu
+[02:32:23] rust-mt 1 ul c=1 35.5 Gbit/s 0.248 cpu-s/GB peak 8364 KiB err 0
+[02:32:31] rust-mt 1 ul c=8 112.5 Gbit/s 0.235 cpu-s/GB peak 14716 KiB err 0
+[02:32:39] rust-mt 1 ul c=32 61.2 Gbit/s 0.443 cpu-s/GB peak 30464 KiB err 0
+[02:32:51] rust-mt 1 ul paced 1G 1.00 Gbit/s 4.9% cpu
+[02:33:00] rust-mt 1 ping p50/p99 idle 46/79 us, loaded 46/16769 us
+[02:33:09] rust-mt 1 churn 21568 conn/s, err 0, rss 6788->7004 KiB, threads 5->5
+[02:33:17] rust-ct 1 dl c=1 37.1 Gbit/s 0.215 cpu-s/GB peak 3764 KiB err 0
+[02:33:25] rust-ct 1 dl c=8 37.0 Gbit/s 0.216 cpu-s/GB peak 3848 KiB err 0
+[02:33:33] rust-ct 1 dl c=32 36.9 Gbit/s 0.217 cpu-s/GB peak 4148 KiB err 0
+[02:33:45] rust-ct 1 dl paced 1G 1.00 Gbit/s 2.6% cpu
+[02:33:53] rust-ct 1 ul c=1 35.1 Gbit/s 0.148 cpu-s/GB peak 5432 KiB err 0
+[02:34:01] rust-ct 1 ul c=8 49.6 Gbit/s 0.159 cpu-s/GB peak 8740 KiB err 0
+[02:34:09] rust-ct 1 ul c=32 33.4 Gbit/s 0.240 cpu-s/GB peak 18512 KiB err 0
+[02:34:21] rust-ct 1 ul paced 1G 1.00 Gbit/s 2.4% cpu
+[02:34:30] rust-ct 1 ping p50/p99 idle 46/86 us, loaded 46/65 us
+[02:34:39] rust-ct 1 churn 20365 conn/s, err 0, rss 4436->4436 KiB, threads 1->1
+[02:34:47] zig 1 dl c=1 34.8 Gbit/s 0.229 cpu-s/GB peak 2204 KiB err 0
+[02:34:55] zig 1 dl c=8 93.8 Gbit/s 0.341 cpu-s/GB peak 6052 KiB err 0
+[02:35:03] zig 1 dl c=32 93.3 Gbit/s 0.343 cpu-s/GB peak 20340 KiB err 0
+[02:35:15] zig 1 dl paced 1G 1.00 Gbit/s 3.5% cpu
+[02:35:23] zig 1 ul c=1 38.9 Gbit/s 0.116 cpu-s/GB peak 20400 KiB err 0
+[02:35:31] zig 1 ul c=8 133.2 Gbit/s 0.177 cpu-s/GB peak 20844 KiB err 0
+[02:35:39] zig 1 ul c=32 110.6 Gbit/s 0.185 cpu-s/GB peak 21988 KiB err 0
+[02:35:51] zig 1 ul paced 1G 1.00 Gbit/s 3.7% cpu
+[02:36:00] zig 1 ping p50/p99 idle 39/72 us, loaded 82/4065 us
+[02:36:09] zig 1 churn 21777 conn/s, err 0, rss 21992->22552 KiB, threads 34->34
+[02:36:17] bun 1 dl c=1 23.0 Gbit/s 0.348 cpu-s/GB peak 38248 KiB err 0
+[02:36:25] bun 1 dl c=8 24.0 Gbit/s 0.333 cpu-s/GB peak 38380 KiB err 0
+[02:36:33] bun 1 dl c=32 24.6 Gbit/s 0.326 cpu-s/GB peak 36816 KiB err 0
+[02:36:45] bun 1 dl paced 1G 1.00 Gbit/s 14.1% cpu
+[02:36:53] bun 1 ul c=1 31.2 Gbit/s 0.290 cpu-s/GB peak 104604 KiB err 0
+[02:37:01] bun 1 ul c=8 27.3 Gbit/s 0.318 cpu-s/GB peak 85776 KiB err 0
+[02:37:09] bun 1 ul c=32 20.1 Gbit/s 0.435 cpu-s/GB peak 164636 KiB err 0
+[02:37:21] bun 1 ul paced 1G 1.00 Gbit/s 9.0% cpu
+[02:37:31] bun 1 ping p50/p99 idle 46/69 us, loaded 47/65 us
+[02:37:39] bun 1 churn 21838 conn/s, err 0, rss 38144->38144 KiB, threads 6->6
+[02:37:47] go 2 dl c=1 32.3 Gbit/s 0.264 cpu-s/GB peak 14108 KiB err 0
+[02:37:55] go 2 dl c=8 87.2 Gbit/s 0.356 cpu-s/GB peak 14812 KiB err 0
+[02:38:03] go 2 dl c=32 90.7 Gbit/s 0.344 cpu-s/GB peak 16888 KiB err 0
+[02:38:15] go 2 dl paced 1G 1.00 Gbit/s 3.4% cpu
+[02:38:23] go 2 ul c=1 34.8 Gbit/s 0.191 cpu-s/GB peak 16904 KiB err 0
+[02:38:31] go 2 ul c=8 129.9 Gbit/s 0.182 cpu-s/GB peak 16616 KiB err 0
+[02:38:39] go 2 ul c=32 101.3 Gbit/s 0.236 cpu-s/GB peak 19044 KiB err 0
+[02:38:51] go 2 ul paced 1G 1.00 Gbit/s 4.5% cpu
+[02:39:01] go 2 ping p50/p99 idle 65/113 us, loaded 85/15421 us
+[02:39:09] go 2 churn 20308 conn/s, err 0, rss 14792->14696 KiB, threads 23->23
+[02:39:17] rust-mt 2 dl c=1 37.3 Gbit/s 0.214 cpu-s/GB peak 4032 KiB err 0
+[02:39:25] rust-mt 2 dl c=8 106.5 Gbit/s 0.300 cpu-s/GB peak 4180 KiB err 0
+[02:39:33] rust-mt 2 dl c=32 97.5 Gbit/s 0.328 cpu-s/GB peak 4500 KiB err 0
+[02:39:45] rust-mt 2 dl paced 1G 1.00 Gbit/s 3.2% cpu
+[02:39:53] rust-mt 2 ul c=1 36.1 Gbit/s 0.246 cpu-s/GB peak 8752 KiB err 0
+[02:40:01] rust-mt 2 ul c=8 116.0 Gbit/s 0.231 cpu-s/GB peak 15480 KiB err 0
+[02:40:09] rust-mt 2 ul c=32 60.0 Gbit/s 0.488 cpu-s/GB peak 28088 KiB err 0
+[02:40:21] rust-mt 2 ul paced 1G 1.00 Gbit/s 5.4% cpu
+[02:40:31] rust-mt 2 ping p50/p99 idle 46/77 us, loaded 47/17779 us
+[02:40:39] rust-mt 2 churn 21764 conn/s, err 0, rss 8076->8228 KiB, threads 5->5
+[02:40:47] rust-ct 2 dl c=1 36.9 Gbit/s 0.216 cpu-s/GB peak 3756 KiB err 0
+[02:40:55] rust-ct 2 dl c=8 37.4 Gbit/s 0.213 cpu-s/GB peak 3832 KiB err 0
+[02:41:03] rust-ct 2 dl c=32 37.1 Gbit/s 0.216 cpu-s/GB peak 4120 KiB err 0
+[02:41:15] rust-ct 2 dl paced 1G 1.00 Gbit/s 2.5% cpu
+[02:41:24] rust-ct 2 ul c=1 35.6 Gbit/s 0.145 cpu-s/GB peak 5068 KiB err 0
+[02:41:32] rust-ct 2 ul c=8 50.1 Gbit/s 0.158 cpu-s/GB peak 8756 KiB err 0
+[02:41:40] rust-ct 2 ul c=32 33.5 Gbit/s 0.239 cpu-s/GB peak 19296 KiB err 0
+[02:41:52] rust-ct 2 ul paced 1G 1.00 Gbit/s 2.5% cpu
+[02:42:01] rust-ct 2 ping p50/p99 idle 47/72 us, loaded 45/70 us
+[02:42:10] rust-ct 2 churn 20416 conn/s, err 0, rss 4360->4360 KiB, threads 1->1
+[02:42:18] zig 2 dl c=1 34.1 Gbit/s 0.234 cpu-s/GB peak 2204 KiB err 0
+[02:42:26] zig 2 dl c=8 93.8 Gbit/s 0.341 cpu-s/GB peak 7944 KiB err 0
+[02:42:34] zig 2 dl c=32 90.8 Gbit/s 0.352 cpu-s/GB peak 20260 KiB err 0
+[02:42:46] zig 2 dl paced 1G 1.00 Gbit/s 3.6% cpu
+[02:42:54] zig 2 ul c=1 40.5 Gbit/s 0.116 cpu-s/GB peak 20320 KiB err 0
+[02:43:02] zig 2 ul c=8 122.1 Gbit/s 0.182 cpu-s/GB peak 20800 KiB err 0
+[02:43:10] zig 2 ul c=32 118.7 Gbit/s 0.186 cpu-s/GB peak 21884 KiB err 0
+[02:43:22] zig 2 ul paced 1G 1.00 Gbit/s 3.7% cpu
+[02:43:31] zig 2 ping p50/p99 idle 40/65 us, loaded 82/4191 us
+[02:43:39] zig 2 churn 21414 conn/s, err 0, rss 21888->22112 KiB, threads 34->34
+[02:43:47] bun 2 dl c=1 22.8 Gbit/s 0.351 cpu-s/GB peak 37476 KiB err 0
+[02:43:55] bun 2 dl c=8 24.2 Gbit/s 0.331 cpu-s/GB peak 41548 KiB err 0
+[02:44:03] bun 2 dl c=32 24.3 Gbit/s 0.330 cpu-s/GB peak 49088 KiB err 0
+[02:44:15] bun 2 dl paced 1G 1.00 Gbit/s 14.4% cpu
+[02:44:23] bun 2 ul c=1 33.8 Gbit/s 0.267 cpu-s/GB peak 102148 KiB err 0
+[02:44:31] bun 2 ul c=8 27.8 Gbit/s 0.311 cpu-s/GB peak 83992 KiB err 0
+[02:44:39] bun 2 ul c=32 20.5 Gbit/s 0.425 cpu-s/GB peak 276296 KiB err 0
+[02:44:51] bun 2 ul paced 1G 1.00 Gbit/s 9.2% cpu
+[02:45:01] bun 2 ping p50/p99 idle 45/66 us, loaded 46/66 us
+[02:45:10] bun 2 churn 20677 conn/s, err 0, rss 38280->38280 KiB, threads 6->6
+[02:45:18] go 3 dl c=1 33.6 Gbit/s 0.255 cpu-s/GB peak 14096 KiB err 0
+[02:45:26] go 3 dl c=8 90.0 Gbit/s 0.348 cpu-s/GB peak 16476 KiB err 0
+[02:45:34] go 3 dl c=32 93.9 Gbit/s 0.333 cpu-s/GB peak 16436 KiB err 0
+[02:45:46] go 3 dl paced 1G 1.00 Gbit/s 3.6% cpu
+[02:45:54] go 3 ul c=1 34.9 Gbit/s 0.191 cpu-s/GB peak 16052 KiB err 0
+[02:46:02] go 3 ul c=8 123.6 Gbit/s 0.182 cpu-s/GB peak 16396 KiB err 0
+[02:46:10] go 3 ul c=32 101.0 Gbit/s 0.222 cpu-s/GB peak 21104 KiB err 0
+[02:46:22] go 3 ul paced 1G 1.00 Gbit/s 4.7% cpu
+[02:46:31] go 3 ping p50/p99 idle 69/122 us, loaded 80/15653 us
+[02:46:40] go 3 churn 20155 conn/s, err 0, rss 15576->15756 KiB, threads 20->20
+[02:46:48] rust-mt 3 dl c=1 39.0 Gbit/s 0.205 cpu-s/GB peak 3952 KiB err 0
+[02:46:56] rust-mt 3 dl c=8 98.3 Gbit/s 0.325 cpu-s/GB peak 4116 KiB err 0
+[02:47:04] rust-mt 3 dl c=32 93.7 Gbit/s 0.337 cpu-s/GB peak 4440 KiB err 0
+[02:47:16] rust-mt 3 dl paced 1G 1.00 Gbit/s 3.2% cpu
+[02:47:24] rust-mt 3 ul c=1 37.9 Gbit/s 0.235 cpu-s/GB peak 8696 KiB err 0
+[02:47:32] rust-mt 3 ul c=8 119.3 Gbit/s 0.222 cpu-s/GB peak 14912 KiB err 0
+[02:47:40] rust-mt 3 ul c=32 60.5 Gbit/s 0.471 cpu-s/GB peak 26964 KiB err 0
+[02:47:52] rust-mt 3 ul paced 1G 1.00 Gbit/s 5.1% cpu
+[02:48:02] rust-mt 3 ping p50/p99 idle 45/65 us, loaded 46/17027 us
+[02:48:10] rust-mt 3 churn 22043 conn/s, err 0, rss 5532->5812 KiB, threads 5->5
+[02:48:18] rust-ct 3 dl c=1 37.3 Gbit/s 0.214 cpu-s/GB peak 3700 KiB err 0
+[02:48:26] rust-ct 3 dl c=8 35.6 Gbit/s 0.225 cpu-s/GB peak 3772 KiB err 0
+[02:48:34] rust-ct 3 dl c=32 40.5 Gbit/s 0.198 cpu-s/GB peak 4064 KiB err 0
+[02:48:46] rust-ct 3 dl paced 1G 1.00 Gbit/s 2.6% cpu
+[02:48:54] rust-ct 3 ul c=1 35.3 Gbit/s 0.146 cpu-s/GB peak 5348 KiB err 0
+[02:49:02] rust-ct 3 ul c=8 52.2 Gbit/s 0.152 cpu-s/GB peak 8320 KiB err 0
+[02:49:10] rust-ct 3 ul c=32 31.1 Gbit/s 0.257 cpu-s/GB peak 19548 KiB err 0
+[02:49:22] rust-ct 3 ul paced 1G 1.00 Gbit/s 2.5% cpu
+[02:49:32] rust-ct 3 ping p50/p99 idle 46/77 us, loaded 45/64 us
+[02:49:40] rust-ct 3 churn 20167 conn/s, err 0, rss 4808->4812 KiB, threads 1->1
+[02:49:48] zig 3 dl c=1 34.8 Gbit/s 0.229 cpu-s/GB peak 2200 KiB err 0
+[02:49:56] zig 3 dl c=8 93.5 Gbit/s 0.341 cpu-s/GB peak 6024 KiB err 0
+[02:50:04] zig 3 dl c=32 93.5 Gbit/s 0.337 cpu-s/GB peak 20240 KiB err 0
+[02:50:16] zig 3 dl paced 1G 1.00 Gbit/s 3.4% cpu
+[02:50:24] zig 3 ul c=1 38.6 Gbit/s 0.118 cpu-s/GB peak 20300 KiB err 0
+[02:50:32] zig 3 ul c=8 127.4 Gbit/s 0.181 cpu-s/GB peak 20720 KiB err 0
+[02:50:40] zig 3 ul c=32 109.6 Gbit/s 0.186 cpu-s/GB peak 21864 KiB err 0
+[02:50:52] zig 3 ul paced 1G 1.00 Gbit/s 3.4% cpu
+[02:51:02] zig 3 ping p50/p99 idle 39/59 us, loaded 87/4483 us
+[02:51:10] zig 3 churn 21035 conn/s, err 0, rss 21868->22108 KiB, threads 34->34
+[02:51:18] bun 3 dl c=1 26.3 Gbit/s 0.304 cpu-s/GB peak 37000 KiB err 0
+[02:51:26] bun 3 dl c=8 23.9 Gbit/s 0.335 cpu-s/GB peak 38700 KiB err 0
+[02:51:34] bun 3 dl c=32 24.0 Gbit/s 0.334 cpu-s/GB peak 40984 KiB err 0
+[02:51:46] bun 3 dl paced 1G 1.00 Gbit/s 14.6% cpu
+[02:51:54] bun 3 ul c=1 32.2 Gbit/s 0.282 cpu-s/GB peak 101892 KiB err 0
+[02:52:02] bun 3 ul c=8 27.7 Gbit/s 0.314 cpu-s/GB peak 90292 KiB err 0
+[02:52:10] bun 3 ul c=32 21.2 Gbit/s 0.408 cpu-s/GB peak 166824 KiB err 0
+[02:52:22] bun 3 ul paced 1G 1.00 Gbit/s 8.9% cpu
+[02:52:32] bun 3 ping p50/p99 idle 45/62 us, loaded 45/67 us
+[02:52:40] bun 3 churn 21542 conn/s, err 0, rss 38540->38540 KiB, threads 6->6

@@ -1,0 +1,5 @@
+{"at":"2026-10-30T02:26:57.998Z","server":"go","max_ms":6.925,"median_ms":6.563,"min_ms":5.236,"mode":"coldstart","n":20}
+{"at":"2026-10-30T02:26:59.145Z","server":"rust-mt","max_ms":7.771,"median_ms":6.427,"min_ms":6.049,"mode":"coldstart","n":20}
+{"at":"2026-10-30T02:27:00.287Z","server":"rust-ct","max_ms":7.015,"median_ms":6.401,"min_ms":5.17,"mode":"coldstart","n":20}
+{"at":"2026-10-30T02:27:01.396Z","server":"zig","max_ms":8.108,"median_ms":4.303,"min_ms":4.023,"mode":"coldstart","n":20}
+{"at":"2026-10-30T03:05:14.382Z","server":"bun","max_ms":10.288,"median_ms":7.65,"min_ms":6.927,"mode":"coldstart","n":20}
