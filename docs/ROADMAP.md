@@ -26,9 +26,10 @@ Done when `make check` passes here, the footprint check reports every
 budget met, and the image builds on a machine with Docker. Building the image
 is the owner's step until CI exists; give exact commands.
 
-## M2. Web UI v1
+## M2. Web UI v1 (built 2026-10-30; phones, Safari, iperf3 and the image not yet checked)
 
-Needs: #9 (auth default), #11 (branding). UI direction: ADR-0004.
+Needs: nothing open (#9 is ADR-0008, #11 is ADR-0009). UI direction:
+ADR-0004. Browser engine: ADR-0010.
 
 - `web/` in TypeScript with no framework, built by Bun and embedded in the
   binary. It matches `prototypes/dyno-ui.html`, including the phone layout.

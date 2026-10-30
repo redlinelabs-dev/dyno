@@ -1,0 +1,138 @@
+/* Ported from prototypes/dyno-ui.html (Fast lane with Cluster's latency gauge,
+   ADR-0004). The prototype's shell bar and phone frame are gone; the stage is
+   the whole page and the telemetry sheet is fixed to the viewport. */
+@font-face { font-family: "Barlow"; font-weight: 400; font-display: swap; src: url("./fonts/barlow-400.woff2") format("woff2") }
+@font-face { font-family: "Barlow"; font-weight: 500; font-display: swap; src: url("./fonts/barlow-500.woff2") format("woff2") }
+@font-face { font-family: "Barlow"; font-weight: 600; font-display: swap; src: url("./fonts/barlow-600.woff2") format("woff2") }
+@font-face { font-family: "Big Shoulders Display"; font-weight: 700 900; font-display: swap; src: url("./fonts/big-shoulders-display.woff2") format("woff2") }
+
+:root {
+  --carbon: #15171C; --black: #0B0D11; --bone: #F2EDE2; --bezel: #D8DBE0; --red: #E3242B; --deep: #8E141B; --orange: #FF5A1F;
+  --f-num: "Big Shoulders Display", "Barlow", sans-serif; --f-ui: "Barlow", system-ui, sans-serif;
+  --mute: #8D929B; --line: #2A2E36; --face: #181A20;
+  --s-panel: #15171C; --s-line: #2A2E36; --s-mute: #8D929B; --s-input: #0F1115;
+  --c-down: var(--red); --c-up: var(--bezel); --c-lat: var(--orange);
+  color-scheme: dark; background: #0F1115;
+}
+* { box-sizing: border-box }
+body { margin: 0; background: #0F1115; color: var(--bone); font-family: var(--f-ui) }
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px }
+button { -webkit-tap-highlight-color: transparent; font-family: inherit }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
+[hidden] { display: none !important }
+
+.stage { container: stage / inline-size; position: relative; min-height: 100dvh }
+
+/* ---------- view frame (committed dark: the dash at night) ---------- */
+.v { min-height: 100dvh; color: var(--bone); font-family: var(--f-ui);
+  display: grid; justify-items: center; align-content: start; gap: 20px;
+  padding: max(20px, env(safe-area-inset-top, 0px)) max(16px, 3cqi, env(safe-area-inset-right, 0px)) 40px max(16px, 3cqi, env(safe-area-inset-left, 0px)) }
+.v-top { width: 100%; max-width: 1240px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; color: var(--mute) }
+.v-logo { display: flex; align-items: baseline; gap: 10px }
+.v-brand { font-family: var(--f-num); font-weight: 900; font-size: 24px; color: var(--bone); letter-spacing: .02em; font-style: italic; transform: skewX(-6deg) }
+.v-brand b { color: var(--red) }
+.v-by { font-size: 12px; color: var(--mute); letter-spacing: .02em }
+.v-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
+.g-tick { stroke: var(--bone) } .g-tick.minor { stroke: var(--mute) }
+.g-lab { fill: var(--bone); font-family: var(--f-num); font-weight: 800; text-anchor: middle; dominant-baseline: middle }
+.g-red { fill: none; stroke: var(--red) }
+.g-ndl { fill: var(--orange) }
+.g-hub { fill: var(--black); stroke: var(--orange) }
+.g-needle, .g-ghost { transform-box: view-box; transition: transform .16s linear }
+.g-ghost line { stroke: var(--orange); opacity: .55 }
+.tele-link { font: inherit; font-size: 14px; font-weight: 500; color: var(--mute); background: none; border: 0; padding: 8px 6px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px }
+.tele-link:hover { color: var(--bone) }
+
+/* ---------- form bits (setup + history inside telemetry) ---------- */
+.pnlx { display: grid; gap: 16px; min-width: 0 }
+.note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--s-mute) }
+.setgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 22px }
+.field { display: grid; gap: 6px; align-content: start; border: 0; padding: 0; margin: 0; min-width: 0 }
+.field > label, .field > legend { font-size: 13px; color: var(--s-mute); padding: 0; margin-bottom: 6px }
+.field select, .field input[type="number"] { font: inherit; font-size: 15px; background: var(--s-input); color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 8px 10px; min-width: 0; width: 100% }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--s-line); border-radius: 6px; overflow: hidden; width: fit-content }
+.seg label { position: relative; cursor: pointer; font-size: 14px }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
+.seg span { display: block; padding: 7px 13px }
+.seg input:checked + span { background: var(--red); color: var(--bone) }
+.seg input:focus-visible + span { outline: 2px solid var(--orange); outline-offset: -3px }
+.exp { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center }
+.sbtn { font: inherit; font-size: 14px; background: none; color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 7px 12px; cursor: pointer }
+.sbtn:disabled { opacity: .4; cursor: default }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 9px 18px; margin: 0; font-size: 14.5px }
+.kv dt { color: var(--s-mute) } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-family: var(--f-num); font-size: 17px; font-weight: 700 }
+.tw { overflow-x: auto }
+.hist { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; min-width: 520px }
+.hist th { text-align: left; font-weight: 500; color: var(--s-mute); font-size: 12.5px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--s-line) }
+.hist td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--s-line); white-space: nowrap }
+.hist td.n { font-family: var(--f-num); font-weight: 700; font-size: 16px }
+.tl { display: block; width: 100%; height: 150px }
+.tl-d { fill: var(--c-down); fill-opacity: .3; stroke: var(--c-down); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.tl-u { fill: var(--c-up); fill-opacity: .25; stroke: var(--c-up); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.tl-l { fill: none; stroke: var(--c-lat); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--s-mute); margin: 0; padding: 0; list-style: none }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px }
+.gradebox { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center }
+.grade { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 14px; background: var(--red); color: var(--bone); font-family: var(--f-num); font-weight: 900; font-size: 50px; line-height: 1 }
+.gradebox p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--s-mute) }
+.gradebox p b { color: var(--bone); font-weight: 600; display: block; margin-bottom: 2px }
+.latgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px 36px }
+@container stage (max-width: 640px) { .latgrid { grid-template-columns: 1fr } }
+
+/* ---------- telemetry sheet ---------- */
+.sheet-wrap { position: fixed; inset: 0; z-index: 5; display: grid; align-items: end }
+.sheet-back { position: absolute; inset: 0; background: rgb(5 6 8 / .62); border: 0; padding: 0; cursor: default }
+.sheet { position: relative; justify-self: center; width: min(100%, 880px); max-height: 84dvh; overflow: auto; background: var(--s-panel); color: var(--bone); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 20px 20px 0 0; padding: 10px max(18px, 3cqi) max(30px, env(safe-area-inset-bottom, 0px)); display: grid; gap: 18px; align-content: start; animation: sheet-up .22s ease-out; font-family: var(--f-ui) }
+@keyframes sheet-up { from { translate: 0 40px; opacity: 0 } }
+.sheet-grab { width: 40px; height: 4px; border-radius: 2px; background: #3A3E47; justify-self: center }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap }
+.tabs { display: inline-flex; flex-wrap: wrap; gap: 4px }
+.tabs button { font-size: 14px; font-weight: 500; color: var(--mute); background: none; border: 1px solid transparent; border-radius: 999px; padding: 7px 13px; cursor: pointer; white-space: nowrap }
+.tabs button[aria-selected="true"] { color: var(--carbon); background: var(--bone) }
+.tabs .short { display: none }
+.sheet-x { font-size: 14px; color: var(--bone); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; cursor: pointer }
+@container stage (max-width: 640px) {
+  .sheet-head { flex-wrap: nowrap }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0 }
+  .sheet, .sheet-wrap { grid-template-columns: minmax(0, 1fr) }
+}
+@container stage (max-width: 480px) { .tabs button { padding: 7px 10px } .tabs .long { display: none } .tabs .short { display: inline } }
+
+/* ---------- fast lane ---------- */
+.f-dial { position: relative; width: min(100%, 540px); margin-top: 2cqi }
+.f-dial svg { display: block; width: 100%; height: auto; overflow: visible }
+.f-track { fill: none; stroke: #20232A; stroke-width: 16; stroke-linecap: round }
+.f-fill { fill: none; stroke: var(--bone); stroke-width: 16; stroke-linecap: round }
+.f-over { fill: none; stroke: var(--red); stroke-width: 16 }
+.f-zone { fill: none; stroke: var(--red); stroke-width: 3 }
+.f-tip { fill: var(--orange); stroke: #0F1115; stroke-width: 5 }
+.f-lab { fill: var(--mute); font-family: var(--f-num); font-weight: 700; font-size: 17px; text-anchor: middle; dominant-baseline: middle }
+.f-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; padding-top: 6% }
+.f-phase { font-size: 14px; color: var(--mute); display: flex; align-items: center; gap: 7px }
+.f-phase i { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); opacity: 0 }
+.running .f-phase i { opacity: 1; animation: blink 1s ease-in-out infinite }
+@keyframes blink { 50% { opacity: .2 } }
+.f-val { font-family: var(--f-num); font-weight: 900; font-size: clamp(88px, 25cqi, 168px); line-height: .88; font-variant-numeric: tabular-nums; letter-spacing: -.01em }
+.f-val.long { font-size: clamp(64px, 17cqi, 116px) }
+.f-unit { font-size: 16px; color: var(--mute) }
+.f-sub { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: -2cqi }
+.chip { display: grid; grid-auto-flow: column; align-items: baseline; gap: 6px; font-size: 13.5px; color: var(--mute); background: #15171C; border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; cursor: pointer }
+.chip b { font-family: var(--f-num); font-weight: 800; font-size: 22px; color: var(--bone); font-variant-numeric: tabular-nums }
+.chip:hover { border-color: #4A4F59 }
+.chip .sep { width: 1px; height: 14px; background: var(--line); align-self: center }
+.f-act { display: flex; gap: 14px; align-items: center }
+.go { font-size: 15px; font-weight: 600; color: var(--carbon); background: var(--bone); border: 0; border-radius: 999px; padding: 11px 22px; cursor: pointer }
+.go:disabled { opacity: .35; cursor: default }
+.f-msg { margin: 0; max-width: 46ch; text-align: center; font-size: 13.5px; line-height: 1.45; color: var(--mute) }
+.f-msg.warn { color: var(--orange) }
+
+/* ---------- latency tab: Cluster's gauge ---------- */
+.lg { --face: #0F1115; display: grid; justify-items: center; gap: 2px; align-content: start }
+.lg svg { display: block; width: min(100%, 300px); height: auto; overflow: visible }
+.lg-read { font-family: var(--f-num); font-weight: 800; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; margin-top: 6px }
+.lg-read small { font-family: var(--f-ui); font-size: 13px; font-weight: 500; color: var(--s-mute); margin-left: 4px }
+.lg-busy { font-size: 13px; color: var(--orange); min-height: 1.4em }
+.latside { display: grid; gap: 22px; align-content: start }
+
+@media (prefers-reduced-motion: reduce) { .g-needle, .g-ghost { transition: none } .sheet { animation: none } .running .f-phase i { animation: none } }

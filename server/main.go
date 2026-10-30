@@ -4,6 +4,7 @@
 // Configuration is by environment so compose.yaml needs no files:
 //
 //	DYNO_LISTEN  address to listen on (default :3966, "DYNO" on a phone keypad)
+//	DYNO_DATA    directory for dyno.db (default ./data; /data in the image)
 package main
 
 import (
@@ -23,6 +24,8 @@ import (
 	"github.com/redlinelabs-dev/dyno/server/internal/api"
 	"github.com/redlinelabs-dev/dyno/server/internal/measure"
 	"github.com/redlinelabs-dev/dyno/server/internal/netcap"
+	"github.com/redlinelabs-dev/dyno/server/internal/store"
+	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 	"github.com/redlinelabs-dev/dyno/server/internal/webui"
 )
 
@@ -32,6 +35,7 @@ var version = "dev"
 // Hard caps (ADR-0007).
 const (
 	defaultListen     = ":3966"
+	defaultData       = "data"
 	maxConns          = 256
 	readHeaderTimeout = 10 * time.Second
 	idleTimeout       = 60 * time.Second
@@ -61,7 +65,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	srv := newServer(version, stallTimeout)
+	st, err := store.Open(cmp.Or(os.Getenv("DYNO_DATA"), defaultData))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer st.Close()
+	srv := newServer(version, stallTimeout, st)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
@@ -79,10 +88,11 @@ func main() {
 	}
 }
 
-func newServer(version string, stall time.Duration) *http.Server {
+func newServer(version string, stall time.Duration, st *store.Store) *http.Server {
+	runs := testrun.NewRegistry()
 	mux := http.NewServeMux()
-	(&measure.Endpoints{Stall: stall}).Register(mux)
-	api.Register(mux, version)
+	(&measure.Endpoints{Stall: stall, Runs: runs}).Register(mux)
+	(&api.API{Version: version, Store: st, Runs: runs}).Register(mux)
 	mux.Handle("GET /", webui.Handler())
 	return &http.Server{
 		Handler:           mux,

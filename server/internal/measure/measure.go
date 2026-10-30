@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
 
 const (
@@ -38,9 +40,18 @@ var payload = func() []byte {
 var readBufs = sync.Pool{New: func() any { b := make([]byte, readChunk); return &b }}
 
 // Endpoints holds the measurement handlers. Stall is how long one read or
-// write may block before the connection is dropped.
+// write may block before the connection is dropped. Runs, if set, counts the
+// bytes of requests tagged with a test id (?t=, from the plan).
 type Endpoints struct {
 	Stall time.Duration
+	Runs  *testrun.Registry
+}
+
+func (e *Endpoints) counters(r *http.Request) *testrun.Counters {
+	if e.Runs == nil {
+		return nil
+	}
+	return e.Runs.Get(r.URL.Query().Get("t"))
 }
 
 // Register adds the measurement routes to mux.
@@ -66,6 +77,7 @@ func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bytes must be an integer from 0 to "+strconv.FormatInt(MaxBytes, 10), http.StatusBadRequest)
 		return
 	}
+	tally := e.counters(r)
 	h := w.Header()
 	measurementHeaders(h)
 	h.Set("Content-Type", "application/octet-stream")
@@ -79,7 +91,11 @@ func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
 	for n > 0 {
 		c := min(int64(writeChunk), int64(PayloadSize-off), n)
 		rc.SetWriteDeadline(time.Now().Add(e.Stall))
-		if _, err := w.Write(payload[off : off+int(c)]); err != nil {
+		k, err := w.Write(payload[off : off+int(c)])
+		if tally != nil {
+			tally.Down.Add(int64(k))
+		}
+		if err != nil {
 			return // client went away or stopped reading
 		}
 		n -= c
@@ -98,6 +114,7 @@ func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	bp := readBufs.Get().(*[]byte)
 	defer readBufs.Put(bp)
+	tally := e.counters(r)
 	var total int64
 	last := start
 	for {
@@ -106,6 +123,9 @@ func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
 		if k > 0 {
 			total += int64(k)
 			last = time.Now()
+			if tally != nil {
+				tally.Up.Add(int64(k))
+			}
 		}
 		if total > MaxBytes {
 			tooLarge(w)

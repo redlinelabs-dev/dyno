@@ -13,8 +13,8 @@
 // skips it rather than guess from a short run.
 
 import { $ } from "bun";
-import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
 
 const ROOT = `${import.meta.dir}/..`;
 process.chdir(ROOT);
@@ -26,7 +26,7 @@ const ADDR = `127.0.0.1:${PORT}`;
 
 // ADR-0006 budgets. Change them there first, with measurements.
 const BUDGET = {
-  idleRssMiB: 16,
+  idleRssMiB: 24,
   peakRssMiB: 48,
   soakSlopeKiBPerMin: 16,
 };
@@ -55,9 +55,13 @@ function procStatus(pid: number): Record<string, number> {
   return out;
 }
 
+// Each run gets an empty results database, as a fresh install would.
+const DATA = mkdtempSync(`${tmpdir()}/dyno-footprint-`);
+process.on("exit", () => rmSync(DATA, { recursive: true, force: true }));
+
 async function start() {
   const proc = Bun.spawn(pinned(SERVER_CPUS, [DYNO]), {
-    env: { ...process.env, DYNO_LISTEN: ADDR, GOMEMLIMIT: "64MiB" },
+    env: { ...process.env, DYNO_LISTEN: ADDR, DYNO_DATA: DATA, GOMEMLIMIT: "64MiB" },
     stdout: "ignore",
     stderr: "ignore",
   });

@@ -30,8 +30,9 @@ behind progressive disclosure. Private repo, solo developer.
 | `bench/` | Reproducible runtime benchmark (`bench/README.md`). Also the base for footprint regression checks. |
 | `prototypes/` | Standalone HTML prototypes. Reference only, never imported. |
 
-`web/` doesn't exist yet; M2 creates it, and its build replaces
-`server/internal/webui/dist/`. Follow ADR-0002 for layout. The API contract
+`web/` builds into `server/internal/webui/dist/`, which is gitignored, so
+build with `make` rather than bare `go build`. Follow ADR-0002 for layout and
+ADR-0010 for how the browser runs a test. The API contract
 is `docs/api.md`; keep it in step with the code. Server defaults and caps are
 ADR-0007.
 
@@ -68,13 +69,14 @@ from the root `Makefile` (it finds Go in `~/.local/go` itself):
 
 | Command | What |
 |---|---|
-| `make build` | Static server binary at `bin/dyno` |
-| `make check` | gofmt, go vet, `go test -race`, quick footprint check (~1.5 min). Run before every commit. |
+| `make web` | Web UI into `server/internal/webui/dist/` (the other targets run it first) |
+| `make build` | Static server binary at `bin/dyno`, web UI embedded |
+| `make check` | gofmt, go vet, `go test -race`, web typecheck and `bun test`, quick footprint check (~2 min). Run before every commit. |
 | `make bench` | Full footprint check with the 12-minute soak (~15 min); records to `bench/results/dyno-footprint.jsonl` |
 | `make image` / `make image-multiarch` | Container image; needs Docker, so not on this machine |
 
 Run the server locally with `bin/dyno` (listens on :3966, `DYNO_LISTEN` to
-change).
+change; results go to `./data/dyno.db`, `DYNO_DATA` to change).
 
 This machine is a headless Debian box. Toolchains are user-local: Go in
 `~/.local/go` (not on PATH; use `~/.local/go/bin/go`). Zig and Rust are

@@ -1,5 +1,5 @@
-// Package webui serves the embedded web UI. In M1 dist/ holds one hand-written
-// page; from M2 it holds the Bun build of web/.
+// Package webui serves the embedded web UI. dist/ holds the Bun build of web/
+// (`make web`); it is not in git.
 package webui
 
 import (

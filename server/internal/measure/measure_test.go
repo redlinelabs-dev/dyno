@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
 
 func newServer(t *testing.T, stall time.Duration) *httptest.Server {
@@ -220,5 +222,33 @@ func TestUploadStallTimesOut(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusRequestTimeout {
 		t.Fatalf("status %d, want 408", resp.StatusCode)
+	}
+}
+
+// Requests tagged with a test id are counted for that test (ADR-0002: the
+// server stores its own byte counts with the result).
+func TestTaggedBytesAreCounted(t *testing.T) {
+	runs := testrun.NewRegistry()
+	mux := http.NewServeMux()
+	(&Endpoints{Stall: time.Second, Runs: runs}).Register(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	id := testrun.NewID()
+	resp, err := http.Get(srv.URL + "/dl?bytes=300000&t=" + id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	resp, err = http.Post(srv.URL+"/ul?t="+id, "application/octet-stream", bytes.NewReader(make([]byte, 12345)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	http.Get(srv.URL + "/dl?bytes=10") // untagged: counted nowhere
+
+	if down, up, ok := runs.Take(id); !ok || down != 300000 || up != 12345 {
+		t.Fatalf("counted down %d, up %d, ok %v", down, up, ok)
 	}
 }

@@ -9,12 +9,19 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/redlinelabs-dev/dyno/server/internal/store"
 )
 
 func startServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(nil)
-	srv.Config = newServer("test", time.Second)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	srv.Config = newServer("test", time.Second, st)
 	srv.Start()
 	t.Cleanup(srv.Close)
 	return srv

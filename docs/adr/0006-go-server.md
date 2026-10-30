@@ -43,8 +43,13 @@ own toolchain, where Rust needed `zig cc` for SQLite.
 Not negligent, not tuned to the last byte. Each has headroom over what Go
 measured, and the footprint check fails the build when one is exceeded.
 
-- Idle RSS ≤ 16 MiB with an empty database (10.8 MiB measured without SQLite).
-  Re-measure once M1 adds SQLite, and adjust once with numbers.
+- Idle RSS ≤ 24 MiB with an empty database. This is the one adjustment,
+  made in M2 with SQLite and the web UI in. It was 16 MiB, set from 10.8 MiB
+  measured without SQLite. Measured by hand after 10 s idle: M1 was 15.2 MiB,
+  M2 is 18.6 MiB, and the footprint check read 20.5 MiB. Anonymous memory
+  didn't move (9.3 MiB in both). All of the growth
+  is file-backed pages of the larger binary (6.95 → 11.34 MiB), which the
+  kernel can reclaim. Don't raise this again; cut instead.
 - Peak RSS ≤ 48 MiB at 32 concurrent streams.
 - Soak slope ≤ +16 KiB/min over 10 minutes after a 2-minute warmup.
 - Stalled connections are closed by timeout.

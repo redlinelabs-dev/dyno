@@ -5,7 +5,7 @@ them undecided in code. When one is answered, record it in an ADR in
 `docs/adr/` and delete it here. Each item carries a recommendation, so a short
 answer is enough. Item numbers are stable; answered items are gone from
 this list, not renumbered. Answered so far: #1 (ADR-0004), #2 (ADR-0005),
-#3 (ADR-0006).
+#3 (ADR-0006), #9 (ADR-0008), #11 (ADR-0009).
 
 ## 4. What v1 tests
 
@@ -65,19 +65,9 @@ a 10 GbE LAN; browsers top out near 2.5 Gb/s, so 10 Gb/s needs a native client
 or a node-to-node test. Confirm, or name the boxes it has to run on (the TrueNAS
 host, circuit, a Pi?).
 
-## 9. Exposure and auth
-
-Recommendation: open on the LAN with no login by default. Optional built-in
-password, trusted forward-auth header and OIDC, all free.
-
 ## 10. Native app
 
 Which platform first, and when? Recommendation: iOS after the web UI ships,
 since the Mac mini can build it. The API is designed for it either way
 (ADR-0002).
 
-## 11. Branding
-
-Full Redline Labs dress (carbon, red, bone, Big Shoulders), or dyno's own
-identity with a small "by Redline Labs" mark? All Tach variations so far use
-full dress.

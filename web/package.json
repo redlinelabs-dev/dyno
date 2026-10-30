@@ -1,0 +1,12 @@
+{
+  "name": "dyno-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build.ts",
+    "check": "tsc --noEmit && bun test"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

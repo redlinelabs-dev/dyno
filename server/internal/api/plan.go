@@ -5,12 +5,18 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/redlinelabs-dev/dyno/server/internal/store"
+	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
 
 // Plan is the test plan the server issues. A client follows it rather than
 // hard-coding endpoints or stream counts, so the server can tune a test for
 // every client at once. Clients ignore fields they don't know.
 type Plan struct {
+	// TestID tags this run's /dl and /ul requests (?t=) and its result, so
+	// the server can store its own byte counts with the result.
+	TestID    string     `json:"test_id"`
 	Server    ServerInfo `json:"server"`
 	Endpoints Endpoints  `json:"endpoints"`
 	Latency   Latency    `json:"latency"`
@@ -28,6 +34,7 @@ type Endpoints struct {
 	Download string `json:"download"`
 	Upload   string `json:"upload"`
 	Ping     string `json:"ping"`
+	Results  string `json:"results"`
 }
 
 // Latency says how to probe. Probes always run on their own connection,
@@ -54,10 +61,10 @@ type Transfer struct {
 // docs/research/methodology-and-architecture.md: 5 load streams leave one of
 // a browser's 6 per-host connections for probes, the warmups match
 // LibreSpeed's slow-start grace periods, and the request sizing follows
-// fast.com's and Cloudflare's roughly one-second requests. M2 tunes them
-// against real links.
-func NewPlan(version string) Plan {
-	t := Transfer{
+// fast.com's and Cloudflare's roughly one-second requests. Upload requests
+// stop at 32 MiB because a browser holds the whole body in memory.
+func NewPlan(version, testID string) Plan {
+	down := Transfer{
 		Streams:         5,
 		DurationMs:      10_000,
 		WarmupMs:        1_500,
@@ -65,28 +72,46 @@ func NewPlan(version string) Plan {
 		MaxBytes:        256 << 20,
 		TargetRequestMs: 1_000,
 	}
-	up := t
+	up := down
 	up.WarmupMs = 3_000
+	up.MaxBytes = 32 << 20
 	return Plan{
+		TestID:    testID,
 		Server:    ServerInfo{Name: "dyno", Version: version},
-		Endpoints: Endpoints{Download: "/dl", Upload: "/ul", Ping: "/ping"},
+		Endpoints: Endpoints{Download: "/dl", Upload: "/ul", Ping: "/ping", Results: "/api/v1/results"},
 		Latency:   Latency{IdleSamples: 20, LoadedIntervalMs: 200},
-		Download:  t,
+		Download:  down,
 		Upload:    up,
 	}
 }
 
+// API holds what the /api/v1 handlers need.
+type API struct {
+	Version string
+	Store   *store.Store
+	Runs    *testrun.Registry
+}
+
 // Register adds the /api/v1 routes to mux.
-func Register(mux *http.ServeMux, version string) {
-	plan, err := json.Marshal(NewPlan(version))
-	if err != nil {
-		panic(err)
-	}
-	plan = append(plan, '\n')
-	mux.HandleFunc("GET /api/v1/plan", func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("Content-Type", "application/json")
-		h.Set("Cache-Control", "no-store")
-		w.Write(plan)
-	})
+func (a *API) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/plan", a.plan)
+	mux.HandleFunc("POST /api/v1/results", a.addResult)
+	mux.HandleFunc("GET /api/v1/results", a.listResults)
+	mux.HandleFunc("GET /api/v1/results/{id}", a.getResult)
+}
+
+func (a *API) plan(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, NewPlan(a.Version, testrun.NewID()))
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	h := w.Header()
+	h.Set("Content-Type", "application/json")
+	h.Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
 }
