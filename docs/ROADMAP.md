@@ -7,7 +7,7 @@ Before starting one, ask the owner the decisions-pending items listed under
 ## M0. Research and prototypes (done 2026-10-30)
 
 Brief, three research docs, a runtime benchmark, two rounds of UI prototypes,
-and ADRs 0001–0003.
+the combined pick (`prototypes/dyno-ui.html`) and ADRs 0001–0005.
 
 ## M1. Walking skeleton
 
@@ -28,10 +28,10 @@ is the owner's step until CI exists; give exact commands.
 
 ## M2. Web UI v1
 
-Needs: #1 (Tach variation), #9 (auth default), #11 (branding).
+Needs: #9 (auth default), #11 (branding). UI direction: ADR-0004.
 
 - `web/` in TypeScript with no framework, built by Bun and embedded in the
-  binary. It matches the chosen prototype, including the phone layout.
+  binary. It matches `prototypes/dyno-ui.html`, including the phone layout.
 - Real measurement per ADR-0003: download, upload, idle and loaded latency,
   jitter, bufferbloat grade, and the client-CPU-limited label.
 - The telemetry layer: latency detail, speed over time, setup, history.
@@ -52,9 +52,11 @@ Needs: #4 (scope of scheduled tests).
 
 ## M4. Public release
 
-Needs: #2 (name), #6 (licence), #7 (visibility).
+Needs: #6 (licence), #7 (visibility).
 
-- Licence files, contributor licence agreement, README for r/selfhosted.
+- Licence files, contributor licence agreement if #6 keeps it, README for
+  r/selfhosted.
+- The name clearance check in ADR-0005.
 - Fleet CI baseline (`JimmayVV/fleet-ci`), multi-arch images on GHCR.
 - A footprint report from a real Raspberry Pi.
 

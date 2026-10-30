@@ -2,7 +2,7 @@
 
 A self-hosted network speed test by Redline Labs: as easy as fast.com, prettier
 than LibreSpeed or OpenSpeedTest, with the depth those tools' users ask for
-behind progressive disclosure. Private repo, solo developer. Working name.
+behind progressive disclosure. Private repo, solo developer.
 
 ## Read first
 
@@ -17,8 +17,9 @@ behind progressive disclosure. Private repo, solo developer. Working name.
   area: `methodology-and-architecture.md` before any measurement code,
   `runtime-benchmark.md` before changing the server's runtime or hot path,
   `market-and-demand.md` before adding a feature or touching licensing.
-- `prototypes/`: the signed-off UI direction lives here. The web UI matches
-  the prototype the owner picked; it is the spec for look and behaviour.
+- `prototypes/dyno-ui.html`: the signed-off UI (ADR-0004). The web UI matches
+  it; it is the spec for look and behaviour. The other files there are the
+  rounds it was picked from.
 
 ## Shape
 

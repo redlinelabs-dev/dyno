@@ -1,0 +1,420 @@
+<title>Dyno UI</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Big+Shoulders+Display:wght@600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* Layout: shell bar picks one of four tach variations; the stage is a container-query box (phone frame on desktop) that also hosts the telemetry sheet. */
+:root {
+  --sh-bg: #E7EAEE; --sh-fg: #15171C; --sh-mute: #5B636F; --sh-line: #C9CFD7; --sh-on: #15171C; --sh-onfg: #F2EDE2;
+  --carbon: #15171C; --black: #0B0D11; --bone: #F2EDE2; --bezel: #D8DBE0; --red: #E3242B; --deep: #8E141B; --orange: #FF5A1F;
+  --f-num: "Big Shoulders Display", "Barlow", sans-serif; --f-ui: "Barlow", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --sh-bg: #0B0D11; --sh-fg: #E6E8EB; --sh-mute: #8B929D; --sh-line: #272B32; --sh-on: #F2EDE2; --sh-onfg: #15171C; color-scheme: dark } }
+:root[data-theme="dark"] { --sh-bg: #0B0D11; --sh-fg: #E6E8EB; --sh-mute: #8B929D; --sh-line: #272B32; --sh-on: #F2EDE2; --sh-onfg: #15171C; color-scheme: dark }
+body { background: var(--sh-bg); color: var(--sh-fg); font-family: var(--f-ui) }
+.shell { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 32px; display: grid; gap: 14px; max-width: 1240px; margin: 0 auto }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px }
+.bar h1 { font-size: 15px; font-weight: 600; margin: 0 }
+.bar h1 span { color: var(--sh-mute); font-weight: 400 }
+.pick { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--sh-line); border-radius: 999px; padding: 3px; gap: 2px }
+.pick a { color: var(--sh-fg); text-decoration: none; font-size: 14px; padding: 6px 14px; border-radius: 999px }
+.pick a[aria-current="page"] { background: var(--sh-on); color: var(--sh-onfg) }
+.bar .sp { flex: 1 }
+.bar .tag { font-size: 12px; color: var(--sh-mute) }
+.frame-t { font: inherit; font-size: 13px; color: var(--sh-fg); background: none; border: 1px solid var(--sh-line); border-radius: 999px; padding: 6px 12px; cursor: pointer }
+.frame-t[aria-pressed="true"] { background: var(--sh-on); color: var(--sh-onfg); border-color: var(--sh-on) }
+.blurb { margin: 0; font-size: 14.5px; color: var(--sh-mute); max-width: 74ch; line-height: 1.5 }
+@media (max-width: 520px) { .frame-t { display: none } }
+.stage { container: stage / inline-size; position: relative; border-radius: 18px; overflow: hidden; border: 1px solid var(--sh-line) }
+.stage.phone { max-width: 390px; width: 100%; margin: 0 auto; border-radius: 36px; border: 10px solid var(--sh-on); min-height: 800px }
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px }
+button { -webkit-tap-highlight-color: transparent; font-family: inherit }
+
+/* ---------- shared view frame (committed dark: the dash at night) ---------- */
+.v { min-height: 680px; background: #0F1115; color: var(--bone); font-family: var(--f-ui); color-scheme: dark;
+  --mute: #8D929B; --line: #2A2E36; --face: #181A20;
+  --s-panel: #15171C; --s-line: #2A2E36; --s-mute: #8D929B; --s-accent: var(--red); --s-on: var(--bone); --s-input: #0F1115; --s-radius: 10px; --s-num: var(--f-num);
+  --c-down: var(--red); --c-up: var(--bezel); --c-lat: var(--orange);
+  display: grid; justify-items: center; align-content: start; gap: 20px; padding: 20px max(16px, 3cqi) 40px }
+.stage.phone .v { min-height: 780px }
+.v-top { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; color: var(--mute) }
+.v-brand { font-family: var(--f-num); font-weight: 900; font-size: 24px; color: var(--bone); letter-spacing: .02em; font-style: italic; transform: skewX(-6deg) }
+.v-brand b { color: var(--red) }
+.g-tick { stroke: var(--bone) } .g-tick.minor { stroke: var(--mute) }
+.g-lab { fill: var(--bone); font-family: var(--f-num); font-weight: 800; text-anchor: middle; dominant-baseline: middle }
+.g-red { fill: none; stroke: var(--red) }
+.g-ndl { fill: var(--orange) }
+.g-hub { fill: var(--black); stroke: var(--orange) }
+.g-needle, .g-ghost { transform-box: view-box; transition: transform .16s linear }
+.g-ghost line { stroke: var(--orange); opacity: .55 }
+.pushstart { position: absolute; left: 50%; top: 50%; width: 26%; aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; cursor: pointer;
+  background: radial-gradient(circle at 50% 38%, #2A2D35, #121318 70%); color: var(--bone); border: 3px solid var(--red);
+  box-shadow: 0 0 0 6px var(--black), 0 0 0 7px #3A3E47, 0 10px 30px rgb(0 0 0 / .6);
+  font-family: var(--f-num); font-weight: 900; font-size: clamp(17px, 5cqi, 27px); letter-spacing: .06em; line-height: 1; display: grid; place-content: center; gap: 4px }
+.pushstart small { font-family: var(--f-ui); font-weight: 600; font-size: 10.5px; letter-spacing: .1em; color: var(--mute) }
+.pushstart:hover { border-color: var(--orange) } .pushstart:active { scale: .97 }
+.tele-link { font: inherit; font-size: 14px; font-weight: 500; color: var(--mute); background: none; border: 0; padding: 8px 6px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px }
+.tele-link:hover { color: var(--bone) }
+
+/* ---------- shared form bits (setup + history inside telemetry) ---------- */
+.pnlx { display: grid; gap: 16px; min-width: 0 }
+.note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--s-mute) }
+.setgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 22px }
+.field { display: grid; gap: 6px; align-content: start; border: 0; padding: 0; margin: 0; min-width: 0 }
+.field > label, .field > legend { font-size: 13px; color: var(--s-mute); padding: 0; margin-bottom: 6px }
+.field select, .field input[type="number"] { font: inherit; font-size: 15px; background: var(--s-input); color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 8px 10px; min-width: 0; width: 100% }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--s-line); border-radius: 6px; overflow: hidden; width: fit-content }
+.seg label { position: relative; cursor: pointer; font-size: 14px }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
+.seg span { display: block; padding: 7px 13px }
+.seg input:checked + span { background: var(--red); color: var(--bone) }
+.seg input:focus-visible + span { outline: 2px solid var(--orange); outline-offset: -3px }
+.exp { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center }
+.sbtn { font: inherit; font-size: 14px; background: none; color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 7px 12px; cursor: pointer }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 9px 18px; margin: 0; font-size: 14.5px }
+.kv dt { color: var(--s-mute) } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-family: var(--f-num); font-size: 17px; font-weight: 700 }
+.tw { overflow-x: auto }
+.hist { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; min-width: 520px }
+.hist th { text-align: left; font-weight: 500; color: var(--s-mute); font-size: 12.5px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--s-line) }
+.hist td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--s-line); white-space: nowrap }
+.hist td.n { font-family: var(--f-num); font-weight: 700; font-size: 16px }
+.tl { display: block; width: 100%; height: 150px }
+.tl-d { fill: var(--c-down); fill-opacity: .3; stroke: var(--c-down); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.tl-u { fill: var(--c-up); fill-opacity: .25; stroke: var(--c-up); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.tl-l { fill: none; stroke: var(--c-lat); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--s-mute); margin: 0; padding: 0; list-style: none }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px }
+.gradebox { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center }
+.grade { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 14px; background: var(--red); color: var(--bone); font-family: var(--f-num); font-weight: 900; font-size: 50px; line-height: 1 }
+.gradebox p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--s-mute) }
+.gradebox p b { color: var(--bone); font-weight: 600; display: block; margin-bottom: 2px }
+.latgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px 36px }
+@container stage (max-width: 640px) { .latgrid { grid-template-columns: 1fr } }
+
+[hidden] { display: none !important }
+/* ---------- telemetry sheet ---------- */
+.sheet-wrap { position: absolute; inset: 0; z-index: 5; display: grid; align-items: end }
+.sheet-back { position: absolute; inset: 0; background: rgb(5 6 8 / .62); border: 0; padding: 0; cursor: default }
+.sheet { box-sizing: border-box; position: relative; justify-self: center; width: min(100%, 880px); max-height: 84%; overflow: auto; background: var(--s-panel); color: var(--bone); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 20px 20px 0 0; padding: 10px max(18px, 3cqi) 30px; display: grid; gap: 18px; align-content: start; animation: sheet-up .22s ease-out; font-family: var(--f-ui);
+  --mute: #8D929B; --line: #2A2E36; --s-panel: #15171C; --s-line: #2A2E36; --s-mute: #8D929B; --s-input: #0F1115; --c-down: var(--red); --c-up: var(--bezel); --c-lat: var(--orange) }
+@keyframes sheet-up { from { translate: 0 40px; opacity: 0 } }
+.sheet-grab { width: 40px; height: 4px; border-radius: 2px; background: #3A3E47; justify-self: center }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap }
+.tabs { display: inline-flex; flex-wrap: wrap; gap: 4px }
+.tabs button { font-size: 14px; font-weight: 500; color: var(--mute); background: none; border: 1px solid transparent; border-radius: 999px; padding: 7px 13px; cursor: pointer }
+.tabs button[aria-selected="true"] { color: var(--carbon); background: var(--bone) }
+.sheet-x { font-size: 14px; color: var(--bone); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; cursor: pointer }
+
+/* =================== 1 · FAST LANE =================== */
+.f-dial { position: relative; width: min(100%, 540px); margin-top: 2cqi }
+.f-dial svg { display: block; width: 100%; height: auto; overflow: visible }
+.f-track { fill: none; stroke: #20232A; stroke-width: 16; stroke-linecap: round }
+.f-fill { fill: none; stroke: var(--bone); stroke-width: 16; stroke-linecap: round }
+.f-over { fill: none; stroke: var(--red); stroke-width: 16 }
+.f-zone { fill: none; stroke: var(--red); stroke-width: 3 }
+.f-tip { fill: var(--orange); stroke: #0F1115; stroke-width: 5 }
+.f-lab { fill: var(--mute); font-family: var(--f-num); font-weight: 700; font-size: 17px; text-anchor: middle; dominant-baseline: middle }
+.f-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; padding-top: 6% }
+.f-phase { font-size: 14px; color: var(--mute); display: flex; align-items: center; gap: 7px }
+.f-phase i { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); opacity: 0 }
+.running .f-phase i { opacity: 1; animation: blink 1s ease-in-out infinite }
+@keyframes blink { 50% { opacity: .2 } }
+.f-val { font-family: var(--f-num); font-weight: 900; font-size: clamp(88px, 25cqi, 168px); line-height: .88; font-variant-numeric: tabular-nums; letter-spacing: -.01em }
+.f-unit { font-size: 16px; color: var(--mute) }
+.f-sub { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: -2cqi }
+.chip { display: grid; grid-auto-flow: column; align-items: baseline; gap: 6px; font-size: 13.5px; color: var(--mute); background: #15171C; border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; cursor: pointer }
+.chip b { font-family: var(--f-num); font-weight: 800; font-size: 22px; color: var(--bone); font-variant-numeric: tabular-nums }
+.chip:hover { border-color: #4A4F59 }
+.chip .sep { width: 1px; height: 14px; background: var(--line); align-self: center }
+.f-act { display: flex; gap: 14px; align-items: center }
+.go { font-size: 15px; font-weight: 600; color: var(--carbon); background: var(--bone); border: 0; border-radius: 999px; padding: 11px 22px; cursor: pointer }
+.go:disabled { opacity: .35; cursor: default }
+
+/* ---------- latency tab: Cluster's gauge ---------- */
+.lg { --face: #0F1115; display: grid; justify-items: center; gap: 2px; align-content: start }
+.lg svg { display: block; width: min(100%, 300px); height: auto; overflow: visible }
+.lg-read { font-family: var(--f-num); font-weight: 800; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; margin-top: 6px }
+.lg-read small { font-family: var(--f-ui); font-size: 13px; font-weight: 500; color: var(--s-mute); margin-left: 4px }
+.lg-busy { font-size: 13px; color: var(--orange); min-height: 1.4em }
+.latside { display: grid; gap: 22px; align-content: start }
+.tabs button { white-space: nowrap }
+@container stage (max-width: 640px) { .sheet-head { flex-wrap: nowrap } .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0 } .sheet, .sheet-wrap { grid-template-columns: minmax(0, 1fr) } }
+
+@media (prefers-reduced-motion: reduce) { .g-needle, .g-ghost { transition: none } .sheet { animation: none } .running .f-phase i, .r-leds.shift i { animation: none } }
+</style>
+
+<div class="shell">
+  <div class="bar">
+    <h1>dyno <span>chosen direction</span></h1>
+    <span class="sp"></span>
+    <span class="tag">Simulated test, example data</span>
+    <button class="frame-t" id="frame-t" aria-pressed="false">Phone frame</button>
+  </div>
+  <p class="blurb" id="blurb"></p>
+  <div class="stage" id="stage"></div>
+</div>
+
+<script>
+"use strict";
+// ---------- simulation (same engine as the first prototypes) ----------
+const PROFILES = { quick: { label: "Quick", lat: 1.2, down: 5, up: 4 }, standard: { label: "Standard", lat: 1.6, down: 8, up: 7 }, thorough: { label: "Thorough", lat: 2.5, down: 15, up: 12 } };
+const S = { profile: "standard", streams: "auto", planDown: 1000, planUp: 500, unit: "Mbps", server: "local", schedule: "off" };
+const SERVERS = { local: "This server (dyno.local)", nas: "Basement NAS (10.0.0.4)", vps: "Cloud VPS (Frankfurt)" };
+function rng(seed) { return () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+const median = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+function makeRun(seed) {
+  const r = rng(seed), p = PROFILES[S.profile], dt = 0.1, pts = [];
+  const base = 7.5 + r() * 3, tD = S.planDown * (0.91 + r() * 0.06), tU = S.planUp * (0.8 + r() * 0.08);
+  const bloatD = 12 + r() * 18, bloatU = 34 + r() * 36;
+  let t = 0;
+  const push = (ph, v, ms) => { pts.push({ t: Math.round(t * 100) / 100, ph, v, ms }); t += dt; };
+  while (t < p.lat) push("latency", 0, base + (r() - 0.5) * 2.6);
+  let s = t;
+  while (t < s + p.down) { const k = 1 - Math.exp(-(t - s) / 0.65); let v = tD * k * (1 + (r() - 0.5) * 0.07); if (r() < 0.035) v *= 0.8 + r() * 0.1; push("download", v, base + bloatD * k + r() * 10); }
+  s = t;
+  while (t < s + p.up) { const k = 1 - Math.exp(-(t - s) / 0.9); let v = tU * k * (1 + (r() - 0.5) * 0.09); if (r() < 0.04) v *= 0.78 + r() * 0.1; push("upload", v, base + bloatU * k + r() * 18); }
+  return { pts, total: t, when: new Date(), no: 0 };
+}
+function gradeFor(d) { return d < 5 ? "A+" : d < 30 ? "A" : d < 60 ? "B" : d < 200 ? "C" : d < 400 ? "D" : "F"; }
+const GRADE_TEXT = {
+  "A+": "No slowdown when the line is busy. Calls and games stay smooth during big downloads.",
+  A: "Barely any slowdown when the line is busy. Calls and games stay smooth.",
+  B: "Some slowdown when the line is busy. A video call may stutter while someone uploads a big file.",
+  C: "Noticeable lag when the line is busy. Turning on smart queue management (SQM) in your router usually fixes this.",
+  D: "Heavy lag when the line is busy. Turn on smart queue management (SQM) in your router.",
+  F: "Severe lag when the line is busy. Calls and games will suffer. Turn on SQM in your router."
+};
+function summarize(run, upto = run.pts.length) {
+  const sl = run.pts.slice(0, upto), by = ph => sl.filter(p => p.ph === ph);
+  const L = by("latency"), D = by("download"), U = by("upload");
+  const speed = a => { if (!a.length) return null; const t0 = a[0].t, st = a.filter(p => p.t - t0 > 1.2); return mean((st.length > 3 ? st : a.slice(-3)).map(p => p.v)); };
+  const idle = L.length ? median(L.map(p => p.ms)) : null;
+  const jitter = L.length > 1 ? mean(L.slice(1).map((p, i) => Math.abs(p.ms - L[i].ms))) : null;
+  const ldown = D.length ? median(D.map(p => p.ms)) : null, lup = U.length ? median(U.map(p => p.ms)) : null;
+  const busy = lup != null ? Math.max(ldown, lup) : ldown;
+  return { idle, jitter, ldown, lup, busy, down: speed(D), up: speed(U), loss: 0, grade: upto >= run.pts.length ? gradeFor(busy - idle) : null,
+    peakDown: D.length ? Math.max(...D.map(p => p.v)) : null, peakUp: U.length ? Math.max(...U.map(p => p.v)) : null };
+}
+
+// ---------- app state ----------
+const A = { status: "done", view: "fast", t0: 0, elapsed: 0, sheet: null, page: "main", runNo: 142, autoStarted: false };
+A.prev = makeRun(11); A.prev.no = 141;
+A.run = makeRun(42); A.run.no = 142; A.run.when = new Date(2026, 9, 30, 14, 7);
+A.elapsed = A.run.total;
+function snap() {
+  const run = A.run; let i = run.pts.findIndex(p => p.t > A.elapsed); if (i < 0) i = run.pts.length;
+  const cur = run.pts[i - 1], phase = A.status === "done" ? "done" : cur ? cur.ph : "latency";
+  const recent = run.pts.slice(Math.max(0, i - 4), i).filter(p => p.ph === phase);
+  const live = phase === "latency" ? (cur ? cur.ms : null) : recent.length ? mean(recent.map(p => p.v)) : 0;
+  const loaded = run.pts.slice(0, i).filter(p => p.ph !== "latency").map(p => p.ms);
+  return { status: A.status, running: A.status === "running", phase, i, run, res: summarize(run, i), live, ms: cur ? cur.ms : null,
+    busyMax: loaded.length ? Math.max(...loaded) : null, progress: Math.min(1, A.elapsed / run.total) };
+}
+function start() {
+  if (A.status === "running") return;
+  A.prev = A.run; A.run = makeRun((Math.random() * 1e9) | 0); A.run.no = ++A.runNo;
+  A.status = "running"; A.t0 = performance.now(); A.elapsed = 0; tick();
+}
+function tick() {
+  A.elapsed = (performance.now() - A.t0) / 1000;
+  if (A.elapsed >= A.run.total) { A.elapsed = A.run.total; A.status = "done"; }
+  render();
+  if (A.status === "running") requestAnimationFrame(tick);
+}
+
+// ---------- formatting ----------
+const unit = () => (S.unit === "MBps" ? "MB/s" : "Mbps");
+function fmt(v) { if (v == null || isNaN(v)) return "–"; if (S.unit === "MBps") v /= 8; return v >= 100 ? Math.round(v).toLocaleString("en-US") : v >= 10 ? v.toFixed(0) : v.toFixed(1); }
+const fms = v => (v == null ? "–" : v < 10 ? v.toFixed(1) : String(Math.round(v)));
+
+// ---------- gauge geometry ----------
+function P(cx, cy, r, deg) { const a = ((deg - 90) * Math.PI) / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }
+function ARC(cx, cy, r, a0, a1) { const [x0, y0] = P(cx, cy, r, a0), [x1, y1] = P(cx, cy, r, a1); return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; }
+const logMap = v => Math.min(1, Math.max(0, Math.log10(Math.max(v || 0, 1)) / 4));
+const linMap = max => v => Math.min(1, Math.max(0, (v || 0) / max));
+function logTicks() { const t = []; for (let d = 0; d <= 4; d++) for (let m = 1; m <= 9; m++) { const v = m * 10 ** d; if (v > 10000) break; t.push({ v, k: m === 1 ? "major" : m === 5 ? "mid" : "minor", label: m === 1 ? ["1", "10", "100", "1G", "10G"][d] : null }); } return t; }
+function linTicks(max, minor, major) { const t = []; for (let v = 0; v <= max; v += minor) t.push({ v, k: v % major === 0 ? "major" : "minor", label: v % major === 0 ? String(v) : null }); return t; }
+const angOf = (o, v) => (o.a0 ?? -120) + ((o.a1 ?? 120) - (o.a0 ?? -120)) * o.map(v);
+function gaugeG(o) {
+  const { cx, cy, r, map, ticks, id } = o, a1 = o.a1 ?? 120, tl = r * 0.17, needle = r * 0.86, hub = o.hub ?? r * 0.085;
+  let s = "";
+  if (o.red != null) s += `<path d="${ARC(cx, cy, r * 0.95, angOf(o, o.red), a1)}" class="g-red" stroke-width="${(r * 0.075).toFixed(1)}"/>`;
+  for (const t of ticks) {
+    const a = angOf(o, t.v), len = t.k === "major" ? tl : t.k === "mid" ? tl * 0.62 : tl * 0.4;
+    const [x0, y0] = P(cx, cy, r * 0.9 - len, a), [x1, y1] = P(cx, cy, r * 0.9, a);
+    s += `<line class="g-tick ${t.k}" x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke-width="${(t.k === "major" ? r * 0.038 : t.k === "mid" ? r * 0.02 : r * 0.012).toFixed(2)}"/>`;
+    if (t.label && o.labels !== false) { const [lx, ly] = P(cx, cy, r * 0.6, a); s += `<text class="g-lab" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="${(r * (o.labelScale ?? 0.13)).toFixed(1)}">${t.label}</text>`; }
+  }
+  if (o.ghost) s += `<g id="${id}-ghost" class="g-ghost" style="transform-origin:${cx}px ${cy}px"><line x1="${cx}" y1="${(cy - r * 0.97).toFixed(1)}" x2="${cx}" y2="${(cy - r * 0.74).toFixed(1)}" stroke-width="${(r * 0.05).toFixed(1)}" stroke-linecap="round"/></g>`;
+  s += `<g id="${id}" class="g-needle" style="transform-origin:${cx}px ${cy}px"><path class="g-ndl" d="M${cx - r * 0.026} ${cy + r * 0.13} L${cx - r * 0.008} ${cy - needle} Q${cx} ${cy - needle - r * 0.03} ${cx + r * 0.008} ${cy - needle} L${cx + r * 0.026} ${cy + r * 0.13}Z"/><circle class="g-hub" cx="${cx}" cy="${cy}" r="${hub.toFixed(1)}" stroke-width="${(r * 0.02).toFixed(1)}"/></g>`;
+  return s;
+}
+function setNeedle(el, o, v, which = o.id) { const n = el.querySelector("#" + which); if (n) n.style.transform = `rotate(${angOf(o, v).toFixed(2)}deg)`; }
+
+// ---------- telemetry content ----------
+const HIST = [
+  ["Oct 30, 2:07 PM", 938, 412, 9.1, "B", "This browser, wired"], ["Oct 30, 8:00 AM", 941, 418, 8.4, "A", "Scheduled"],
+  ["Oct 29, 8:00 PM", 612, 401, 11.2, "B", "Scheduled"], ["Oct 29, 2:00 PM", 935, 410, 8.9, "A", "Scheduled"],
+  ["Oct 28, 9:13 PM", 287, 96, 24.0, "C", "Pixel 9, bedroom Wi-Fi"], ["Oct 28, 8:00 AM", 940, 420, 8.2, "A", "Scheduled"]
+];
+function setupBody() {
+  const seg = (name, opts, cur) => `<div class="seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" id="${name}-${v}" value="${v}"${cur === v ? " checked" : ""}><span>${l}</span></label>`).join("")}</div>`;
+  const opt = (o, cur) => Object.entries(o).map(([v, l]) => `<option value="${v}"${cur === v ? " selected" : ""}>${l}</option>`).join("");
+  return `<div class="pnlx"><div class="setgrid">
+    <div class="field"><label for="set-server">Server</label><select id="set-server">${opt(SERVERS, S.server)}</select><p class="note">Run more dyno containers to test between rooms, sites or a VPS.</p></div>
+    <fieldset class="field"><legend>Test length</legend>${seg("set-prof", Object.entries(PROFILES).map(([k, p]) => [k, p.label]), S.profile)}<p class="note">Quick takes about 10 seconds, Thorough about 30.</p></fieldset>
+    <div class="field"><label for="set-streams">Parallel connections</label><select id="set-streams">${opt({ auto: "Auto (recommended)", 1: "1", 2: "2", 4: "4", 5: "5" }, S.streams)}</select><p class="note">Auto adds connections until the speed stops climbing.</p></div>
+    <div class="field"><label for="set-plan">Your plan, down and up (Mbps)</label><div class="pair"><input type="number" id="set-plan" min="1" value="${S.planDown}" aria-label="Plan download Mbps"><input type="number" id="set-planup" min="1" value="${S.planUp}" aria-label="Plan upload Mbps"></div><p class="note">The red zone starts here, so hitting it means you get what you pay for.</p></div>
+    <fieldset class="field"><legend>Units</legend>${seg("set-unit", [["Mbps", "Mbps"], ["MBps", "MB/s"]], S.unit)}</fieldset>
+    <div class="field"><label for="set-sched">Automatic tests</label><select id="set-sched">${opt({ off: "Off", h1: "Every hour", h6: "Every 6 hours", d1: "Daily at 3:00 AM" }, S.schedule)}</select><p class="note">The server runs these on its own and keeps them in History.</p></div>
+  </div>
+  <div class="exp"><button class="sbtn" data-copy="json">Copy result as JSON</button><button class="sbtn" data-copy="prom">Copy Prometheus URL</button><span class="note" aria-live="polite" data-copied></span></div></div>`;
+}
+function historyBody() {
+  return `<div class="pnlx"><div class="tw"><table class="hist"><thead><tr><th>When</th><th>Down (${unit()})</th><th>Up (${unit()})</th><th>Latency</th><th>Grade</th><th>From</th></tr></thead><tbody>${
+    HIST.map(h => `<tr><td>${h[0]}</td><td class="n">${fmt(h[1])}</td><td class="n">${fmt(h[2])}</td><td class="n">${h[3]} ms</td><td>${h[4]}</td><td>${h[5]}</td></tr>`).join("")
+  }</tbody></table></div><p class="note">Example runs. Scheduled rows come from the server; the rest from browsers and phones that ran a test.</p></div>`;
+}
+function latencyBody(r) {
+  return `<div class="latgrid">
+    <div class="lg"><svg viewBox="-6 -6 212 212" role="img" aria-label="Latency gauge. The needle is latency now; the orange marker is the highest latency while the line was busy.">${faceSVG(100, 100, 88)}${gaugeG(CL)}</svg>
+      <span class="lg-read"><span id="lg-v">–</span><small>ms</small></span><span class="lg-busy" id="lg-b"></span></div>
+    <div class="latside" id="lat-side">${latSide(r)}</div></div>`;
+}
+function latSide(r) {
+  return `<div class="gradebox"><span class="grade">${r.grade || "…"}</span><p><b>Bufferbloat grade</b>${r.grade ? GRADE_TEXT[r.grade] : "Appears when the test finishes."}</p></div>
+    <dl class="kv"><dt>Idle latency</dt><dd>${fms(r.idle)} ms</dd><dt>While downloading</dt><dd>${fms(r.ldown)} ms</dd><dt>While uploading</dt><dd>${fms(r.lup)} ms</dd>
+      <dt>Jitter</dt><dd>${fms(r.jitter)} ms</dd><dt>Packet loss</dt><dd>${r.idle == null ? "–" : "0.0%"}</dd><dt>Server</dt><dd>${SERVERS[S.server].replace(/ \(.*/, "")}</dd></dl>`;
+}
+// Builds the gauge once per opening, then moves the needles, so they glide instead of redrawing.
+function drawLatency(b, s, full) {
+  if (full || !b.querySelector("#lat-side")) b.innerHTML = latencyBody(s.res); else b.querySelector("#lat-side").innerHTML = latSide(s.res);
+  const r = s.res, lv = s.running ? s.ms : r.idle, ghost = s.running ? s.busyMax : r.busy;
+  setNeedle(b, CL, lv ?? 0); setNeedle(b, CL, ghost ?? 0, "cl-ghost");
+  b.querySelector("#cl-ghost").style.opacity = ghost ? 1 : 0;
+  b.querySelector("#lg-v").textContent = fms(lv);
+  b.querySelector("#lg-b").textContent = s.running ? (s.busyMax ? `peak ${fms(s.busyMax)} ms while busy` : "") : r.busy != null ? `${fms(r.busy)} ms when busy` : "";
+}
+function timelineSVG(run, i) {
+  const W = 600, H = 150, T = run.total;
+  const maxV = Math.max(S.planDown, ...run.pts.map(p => p.v)) * 1.05, maxMs = Math.max(60, ...run.pts.map(p => p.ms)) * 1.15;
+  const x = t => ((t / T) * W).toFixed(1), y = v => (H - (v / maxV) * (H - 4)).toFixed(1);
+  const sl = run.pts.slice(0, i);
+  const area = ph => { const a = sl.filter(p => p.ph === ph); return a.length < 2 ? "" : `M${x(a[0].t)} ${H} ` + a.map(p => `L${x(p.t)} ${y(p.v)}`).join(" ") + ` L${x(a[a.length - 1].t)} ${H}Z`; };
+  const lat = sl.map((p, j) => `${j ? "L" : "M"}${x(p.t)} ${(H - (p.ms / maxMs) * (H - 4)).toFixed(1)}`).join(" ");
+  return `<div class="pnlx"><svg class="tl" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Speed and latency over the test"><path class="tl-d" d="${area("download")}"/><path class="tl-u" d="${area("upload")}"/><path class="tl-l" d="${lat}"/></svg>
+  <ul class="legend"><li><i style="background:var(--c-down)"></i>Download</li><li><i style="background:var(--c-up)"></i>Upload</li><li><i style="background:var(--c-lat)"></i>Latency</li></ul>
+  <dl class="kv"><dt>Peak download</dt><dd>${fmt(summarize(run, i).peakDown)} ${unit()}</dd><dt>Peak upload</dt><dd>${fmt(summarize(run, i).peakUp)} ${unit()}</dd><dt>Connections</dt><dd>${S.streams === "auto" ? "4, auto" : S.streams}</dd></dl></div>`;
+}
+function resultJSON() {
+  const r = summarize(A.run);
+  return JSON.stringify({ run: A.run.no, at: A.run.when.toISOString(), server: S.server, download_mbps: +r.down.toFixed(1), upload_mbps: +r.up.toFixed(1), idle_ms: +r.idle.toFixed(1), loaded_down_ms: +r.ldown.toFixed(1), loaded_up_ms: +r.lup.toFixed(1), jitter_ms: +r.jitter.toFixed(2), packet_loss_pct: 0, bufferbloat_grade: r.grade }, null, 2);
+}
+const TABS = [["latency", "Latency"], ["speed", "Speed over time"], ["setup", "Setup"], ["history", "History"]];
+function sheetHTML() {
+  return `<div class="sheet-wrap" id="sheet" hidden><button class="sheet-back" data-close aria-label="Close telemetry" tabindex="-1"></button>
+    <section class="sheet" role="dialog" aria-modal="true" aria-label="Telemetry"><div class="sheet-grab"></div>
+      <div class="sheet-head"><div class="tabs" role="tablist">${TABS.map(([k, l]) => `<button role="tab" data-tab="${k}">${l}</button>`).join("")}</div><button class="sheet-x" data-close>Close</button></div>
+      <div id="sheet-body"></div></section></div>`;
+}
+function drawSheet(full) {
+  const w = stage.querySelector("#sheet"); if (!w) return;
+  w.hidden = !A.sheet; if (!A.sheet) return;
+  w.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === A.sheet));
+  const b = w.querySelector("#sheet-body"), s = snap();
+  if (A.sheet === "latency") drawLatency(b, s, full);
+  else if (A.sheet === "speed") b.innerHTML = timelineSVG(s.run, s.i);
+  else if (full) b.innerHTML = A.sheet === "setup" ? setupBody() : historyBody();
+}
+function openSheet(tab) { A.sheet = tab; drawSheet(true); const x = stage.querySelector(".sheet-x"); if (x) x.focus({ preventScroll: true }); }
+
+// =================== 1 · Fast lane ===================
+const FR = 170, FCX = 200, FCY = 200, fAng = v => -120 + 240 * logMap(v);
+const Fast = {
+  mount(el) {
+    const zone = ARC(FCX, FCY, FR + 19, fAng(S.planDown), 120), track = ARC(FCX, FCY, FR, -120, 120);
+    const labs = [1, 10, 100, 1000, 10000].map((v, d) => { const [x, y] = P(FCX, FCY, FR - 34, fAng(v)); return `<text class="f-lab" x="${x.toFixed(1)}" y="${y.toFixed(1)}">${["1", "10", "100", "1G", "10G"][d]}</text>`; }).join("");
+    el.innerHTML = `<div class="v v-fast">
+      <header class="v-top"><span class="v-brand">DYNO<b>/</b></span><span>${SERVERS[S.server]}</span></header>
+      <div class="f-dial"><svg viewBox="0 0 400 310" role="img" aria-label="Speed ring">
+        <path class="f-zone" d="${zone}"/><path class="f-track" d="${track}"/>
+        <path class="f-fill" id="f-fill" d="${track}" pathLength="1" stroke-dasharray="0 1"/>
+        <path class="f-over" id="f-over" d="${track}" pathLength="1" stroke-dasharray="0 1"/>
+        ${labs}<circle class="f-tip" id="f-tip" r="10" cx="0" cy="0"/></svg>
+        <div class="f-center"><span class="f-phase"><i></i><span id="f-ph">Download speed</span></span><span class="f-val" id="f-val">0</span><span class="f-unit" id="f-unit">Mbps</span></div>
+      </div>
+      <div class="f-sub">
+        <button class="chip" data-sheet="latency" aria-label="Latency, open details"><span>Latency</span><b id="f-li">–</b><span>ms idle</span><i class="sep"></i><b id="f-lb">–</b><span>ms busy</span></button>
+        <button class="chip" data-sheet="speed" aria-label="Upload, open details"><span>Upload</span><b id="f-u">–</b><span id="f-uu">Mbps</span></button>
+      </div>
+      <div class="f-act"><button class="go" id="f-go">Test again</button><button class="tele-link" data-sheet="latency">Telemetry</button></div>
+    </div>`;
+    el.querySelector("#f-go").onclick = start;
+    if (!A.autoStarted) { A.autoStarted = true; setTimeout(start, 600); }
+  },
+  render(s, el) {
+    const q = id => el.querySelector(id), r = s.res;
+    el.querySelector(".v").classList.toggle("running", s.running);
+    const v = s.phase === "download" ? s.live : s.phase === "latency" ? 0 : r.down;
+    const f = logMap(v), fp = logMap(S.planDown);
+    q("#f-fill").setAttribute("stroke-dasharray", `${Math.min(f, fp).toFixed(4)} 1`);
+    q("#f-over").setAttribute("stroke-dasharray", f > fp ? `0 ${fp.toFixed(4)} ${(f - fp).toFixed(4)} 1` : "0 1");
+    const [tx, ty] = P(FCX, FCY, FR, fAng(v)); q("#f-tip").setAttribute("cx", tx.toFixed(1)); q("#f-tip").setAttribute("cy", ty.toFixed(1));
+    q("#f-ph").textContent = s.phase === "latency" ? "Connecting" : s.phase === "download" ? "Measuring download" : "Download speed";
+    q("#f-val").textContent = s.phase === "latency" ? "0" : fmt(v);
+    q("#f-unit").textContent = unit(); q("#f-uu").textContent = unit();
+    q("#f-li").textContent = fms(r.idle);
+    q("#f-lb").textContent = fms(s.running ? (s.phase !== "latency" ? s.ms : null) : r.busy);
+    q("#f-u").textContent = s.phase === "upload" ? fmt(s.live) : fmt(r.up);
+    q("#f-go").disabled = s.running; q("#f-go").textContent = s.running ? "Testing…" : "Test again";
+  }
+};
+
+// ---------- latency gauge (from Cluster) ----------
+const CL = { id: "cl", cx: 100, cy: 100, r: 88, map: linMap(150), ticks: linTicks(150, 10, 50), red: 100, ghost: true, labelScale: 0.16 };
+const faceSVG = (cx, cy, r) => `<circle cx="${cx}" cy="${cy}" r="${r * 1.065}" fill="var(--bezel)"/><circle cx="${cx}" cy="${cy}" r="${r * 1.025}" fill="var(--black)"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--face)"/>`;
+
+// ---------- shell ----------
+const VIEWS = { fast: Fast };
+const BLURB = {
+  fast: "Fast lane's screen with Cluster's latency gauge as the first telemetry tab. Tap Latency or Telemetry to open it. The needle is latency now; the orange marker holds the highest latency while the line was busy, so the gap between them is bufferbloat."
+};
+const stage = document.getElementById("stage");
+function mount() { VIEWS[A.view].mount(stage); stage.insertAdjacentHTML("beforeend", sheetHTML()); render(); drawSheet(true); }
+function render() { VIEWS[A.view].render(snap(), stage); if (A.sheet === "latency" || A.sheet === "speed") drawSheet(false); }
+stage.addEventListener("click", async e => {
+  const t = e.target.closest("[data-sheet],[data-close],[data-tab],[data-copy]"); if (!t) return;
+  if (t.dataset.sheet) openSheet(t.dataset.sheet);
+  else if (t.dataset.tab) openSheet(t.dataset.tab);
+  else if (t.hasAttribute("data-close")) { A.sheet = null; drawSheet(); }
+  else if (t.dataset.copy) {
+    const text = t.dataset.copy === "json" ? resultJSON() : "http://dyno.local:8080/metrics", out = t.parentElement.querySelector("[data-copied]");
+    try { await navigator.clipboard.writeText(text); out.textContent = "Copied"; } catch { out.textContent = text.length < 60 ? text : "Copy is blocked here. The full result is in History."; }
+  }
+});
+stage.addEventListener("change", e => {
+  const t = e.target;
+  if (t.name === "set-prof") S.profile = t.value;
+  else if (t.name === "set-unit") { S.unit = t.value; render(); }
+  else if (t.id === "set-streams") S.streams = t.value;
+  else if (t.id === "set-server") S.server = t.value;
+  else if (t.id === "set-sched") S.schedule = t.value;
+  else if (t.id === "set-plan") { S.planDown = Math.max(1, +t.value || 1000); mount(); }
+  else if (t.id === "set-planup") { S.planUp = Math.max(1, +t.value || 500); mount(); }
+});
+addEventListener("keydown", e => { if (e.key === "Escape" && A.sheet) { A.sheet = null; drawSheet(); } });
+function route() {
+  const h = location.hash.slice(1); A.view = VIEWS[h] ? h : "fast"; A.sheet = null; A.page = "main";
+  document.querySelectorAll(".pick a").forEach(a => (a.dataset.v === A.view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+  document.getElementById("blurb").textContent = BLURB[A.view];
+  mount();
+}
+const ft = document.getElementById("frame-t");
+ft.onclick = () => { const on = ft.getAttribute("aria-pressed") !== "true"; ft.setAttribute("aria-pressed", on); stage.classList.toggle("phone", on); };
+addEventListener("hashchange", route);
+route();
+</script>

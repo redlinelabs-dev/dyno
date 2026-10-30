@@ -93,10 +93,11 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 .latgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px 36px }
 @container stage (max-width: 640px) { .latgrid { grid-template-columns: 1fr } }
 
+[hidden] { display: none !important }
 /* ---------- telemetry sheet ---------- */
 .sheet-wrap { position: absolute; inset: 0; z-index: 5; display: grid; align-items: end }
 .sheet-back { position: absolute; inset: 0; background: rgb(5 6 8 / .62); border: 0; padding: 0; cursor: default }
-.sheet { position: relative; justify-self: center; width: min(100%, 880px); max-height: 84%; overflow: auto; background: var(--s-panel); color: var(--bone); border: 1px solid var(--line); border-bottom: 0;
+.sheet { box-sizing: border-box; position: relative; justify-self: center; width: min(100%, 880px); max-height: 84%; overflow: auto; background: var(--s-panel); color: var(--bone); border: 1px solid var(--line); border-bottom: 0;
   border-radius: 20px 20px 0 0; padding: 10px max(18px, 3cqi) 30px; display: grid; gap: 18px; align-content: start; animation: sheet-up .22s ease-out; font-family: var(--f-ui);
   --mute: #8D929B; --line: #2A2E36; --s-panel: #15171C; --s-line: #2A2E36; --s-mute: #8D929B; --s-input: #0F1115; --c-down: var(--red); --c-up: var(--bezel); --c-lat: var(--orange) }
 @keyframes sheet-up { from { translate: 0 40px; opacity: 0 } }

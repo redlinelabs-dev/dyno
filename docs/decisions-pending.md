@@ -3,29 +3,8 @@
 Owner calls that are still open. A build session asks about these and leaves
 them undecided in code. When one is answered, record it in an ADR in
 `docs/adr/` and delete it here. Each item carries a recommendation, so a short
-answer is enough.
-
-## 1. UI: which Tach variation
-
-Round 1 (`prototypes/dyno-prototypes.html`,
-https://claude.ai/artifact/Ujm3JRW6n5zTWGhquakAD8) offered Tach, Quiet and Dyno
-sheet. On 2026-10-30 the owner chose Tach: "the tach is the best. ... Remember I
-love fast.com the best, and I also love that there's telemetry options but that
-it's hidden by default. I want to make sure that things like latency are still
-accessible".
-
-Round 2 (`prototypes/tach-variations.html`,
-https://claude.ai/artifact/DknZQviR6fSNRP6q1BnYEQ) has four variations: **Fast
-lane**, **Cluster**, **Race dash**, **Chrono**. Recommendation: Fast lane as the
-first screen, with Cluster's latency gauge and its peak-latency marker as the
-first telemetry tab.
-
-## 2. Name
-
-"dyno" is a working name: a dynamometer gives an honest power reading, which
-fits Redline Labs. It needs a trademark and package-name check before going
-public. Recommendation: keep it unless the check finds a conflict in
-networking.
+answer is enough. Item numbers are stable; answered items are gone from
+this list, not renumbered. Answered so far: #1 (ADR-0004), #2 (ADR-0005).
 
 ## 3. Confirm Rust for the server
 
@@ -55,23 +34,28 @@ expensive in code and footprint, and WebTransport datagrams are the lighter
 route later. Recommendation: jitter in v1, packet loss in v1.1 over
 WebTransport.
 
-## 6. Licence and the free/paid line
+## 6. Licence
 
-`docs/research/market-and-demand.md` §4 compares the options. FSL, BSL, the
-Elastic License, PolyForm Shield and n8n's licence all leave a business's
-internal use free, so none of them makes a business pay for a speed test.
-Recommendation: AGPLv3 core with a contributor licence agreement, plus a
-proprietary pro module unlocked by an offline Ed25519-signed licence file with
-no phone-home, following Immich's verification pattern.
+Partly answered 2026-10-30. The owner: "I don't _need_ to have this generate
+revenue I just want to leave the option open to." So who pays and what goes in
+pro can wait until someone asks to pay. Until then, anything that could become
+paid stays in its own module (CLAUDE.md), and nobody builds pro features.
 
-Still needed from the owner:
+Still open, needed before the repo goes public (M4): the licence.
+`docs/research/market-and-demand.md` §4 compares the options.
 
-- **Who pays?** Candidates: MSPs placing probes at client sites, office IT, ISP
-  support desks, or ISPs hosting public test servers.
-- **What's in pro?** Candidates from the research: a fleet view over many
-  sites, ISP SLA reports (measured against contracted speed), white-label
-  branding, SAML/SCIM, roles and an audit log, and support. Keep OIDC and
-  forward-auth free: they're the top homelab auth requests.
+- **AGPLv3 with a contributor licence agreement** (recommended). Anyone can
+  self-host and modify it; a company that runs a changed version as a service
+  must publish its changes. The CLA keeps the owner able to sell a commercial
+  licence or a pro module later, which is what "leave the option open" needs.
+  The cost is that a CLA puts off some contributors.
+- **MIT or Apache-2.0.** The most adoption and no CLA needed, and a separate
+  proprietary pro module stays possible. But anyone, including a competitor,
+  can ship dyno inside a paid product without giving anything back.
+
+FSL, BSL, the Elastic License and PolyForm Shield all leave a business's
+internal use free, so they protect against competing hosted services, not
+unpaid business use.
 
 ## 7. Public from day one?
 
