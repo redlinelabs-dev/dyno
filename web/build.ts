@@ -1,6 +1,6 @@
 // Builds the web UI into the folder the Go server embeds. Run from the repo
 // root with `make web`, or directly: `bun web/build.ts`.
-import { rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = import.meta.dir;
@@ -21,3 +21,7 @@ for (const result of await Promise.all(builds)) {
   }
   for (const o of result.outputs) console.log(`${(o.size / 1024).toFixed(1).padStart(7)} KiB  ${o.path.slice(out.length + 1)}`);
 }
+// Files that need fixed names: /favicon.ico and /robots.txt are fetched by
+// convention, and the manifest names its icons. index.html links to the same
+// files, which the bundler copies again under hashed names.
+await cp(join(root, "public"), out, { recursive: true });

@@ -166,7 +166,7 @@ html.sheet-open { overflow: hidden }
    inside the sheet: it would slide the content against a sheet being dragged
    down to dismiss. */
 @media not ((min-width: 700px) and (min-height: 560px)) {
-  .sheet { height: calc(100dvh - 16px); max-height: none; overscroll-behavior: none; padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)) }
+  .sheet { height: calc(100dvh - max(16px, env(safe-area-inset-top, 0px))); max-height: none; overscroll-behavior: none; padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)) }
   .sheet-head { position: sticky; top: -10px; z-index: 3; margin: -6px calc(-1 * max(18px, 3cqi)) 0; padding: 16px max(18px, 3cqi) 8px; background: var(--s-panel) }
 }
 /* Wide screens: a centred dialog rather than a sheet off the bottom edge (ADR-0013). */

@@ -34,7 +34,7 @@ func TestRoutes(t *testing.T) {
 		status int
 		has    string
 	}{
-		{"/", 200, "<title>dyno speed test</title>"},
+		{"/", 200, "<title>dyno speed test | Redline Labs</title>"},
 		{"/api/v1/plan", 200, `"version":"test"`},
 		{"/ping", 204, ""},
 		{"/dl?bytes=10", 200, ""},
