@@ -84,7 +84,8 @@ Stores a finished test. Body, at most 256 KiB:
 ```json
 {
   "test_id": "3f9c2a7e01b44d6a9e5c8b12",
-  "client": "Chrome on Android",
+  "client": "Kitchen iPad",
+  "device": "Kq3xT0b9yWm2vRcL5aZ1eA",
   "download_mbps": 938.2, "upload_mbps": 412.6,
   "idle_ms": 8.4, "loaded_down_ms": 21.0, "loaded_up_ms": 39.5, "jitter_ms": 0.82,
   "streams": 5, "client_limited": false,
@@ -93,7 +94,11 @@ Stores a finished test. Body, at most 256 KiB:
 ```
 
 Speeds are Mbit/s and latencies milliseconds, finite and between 0 and 10⁶.
-`client` is a short label, cut to 80 bytes. `detail` is any JSON value; the
+`client` is the device's name, cut to 80 bytes: one the owner gave it, or a
+label like "Chrome on Android". `device` is optional: an id the client makes
+up for itself and sends with every result, up to 64 letters, digits, `-` or
+`_` (ADR-0022). It isn't a secret or a login, just a way to list one
+device's results. `detail` is any JSON value; the
 web UI sends its time series there (seconds from test start, `dir` 0 for
 download and 1 for upload), plus `spans`: each transfer's
 `[dir, start, counted, end]`, where `counted` is when warm-up ends. The
@@ -115,7 +120,8 @@ result: the fields above plus
 ### `GET /api/v1/results`
 
 `{"results": [...]}`, newest first, without `detail`. `?limit=N` (default
-50, at most 500) and `?before=<id>` page backwards.
+50, at most 500) and `?before=<id>` page backwards. `?device=<id>` keeps
+one device's results.
 
 ### `GET /api/v1/results/{id}`
 

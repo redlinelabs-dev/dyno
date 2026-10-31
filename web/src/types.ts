@@ -70,6 +70,7 @@ export interface StoredResult extends Summary {
   at: string;
   source: string;
   client: string;
+  device: string; // the posting browser's own id, "" for older results
   test_id: string;
   bufferbloat_ms: number;
   grade: string;

@@ -141,9 +141,10 @@ second engine in August 2026 and every other tracker wraps the Ookla CLI.
    next run shown, and schedules change without a restart (STT users call
    restart-to-change "error-prone").
 2. **History.** One range picker for every chart (24 h, 7 d, 30 d, custom),
-   not one per chart. Min, max, average and p10 per range. Failed runs marked
-   on the chart. Retention from forever down to N days. CSV export. All behind
-   the telemetry layer; the first screen doesn't change.
+   not one per chart. A line per device, and a device filter (ADR-0022).
+   Min, max, average and p10 per range. Failed runs marked on the chart.
+   Retention from forever down to N days. CSV export. All behind the
+   telemetry layer; the first screen doesn't change.
 3. **Alerts that don't nag.** Nobody ships these rules yet:
    - thresholds absolute (Mbit/s, ms) or relative to a plan speed the owner
      enters ("below 80% of 500 Mbit/s")

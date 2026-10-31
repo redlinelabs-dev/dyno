@@ -1,7 +1,9 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -59,14 +61,14 @@ func TestListNewestFirstAndPages(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	page, err := s.List(2, 0)
+	page, err := s.List(2, 0, "")
 	if err != nil || len(page) != 2 || page[0].DownloadMbps != 104 || page[1].DownloadMbps != 103 {
 		t.Fatalf("first page %+v, err %v", page, err)
 	}
 	if page[0].Detail != nil {
 		t.Error("List returned detail")
 	}
-	next, _ := s.List(10, page[1].ID)
+	next, _ := s.List(10, page[1].ID, "")
 	if len(next) != 3 || next[0].DownloadMbps != 102 {
 		t.Fatalf("second page %+v", next)
 	}
@@ -80,8 +82,48 @@ func TestReopenKeepsData(t *testing.T) {
 	}
 	s.Add(sample(1))
 	s.Close()
-	got, _ := open(t, dir).List(10, 0)
+	got, _ := open(t, dir).List(10, 0, "")
 	if len(got) != 1 {
 		t.Fatalf("after reopen: %d results", len(got))
+	}
+}
+
+func TestListOneDevice(t *testing.T) {
+	s := open(t, t.TempDir())
+	for i, dev := range []string{"phone", "", "laptop", "phone"} {
+		r := sample(float64(100 + i))
+		r.Device = dev
+		if _, err := s.Add(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	phone, err := s.List(10, 0, "phone")
+	if err != nil || len(phone) != 2 || phone[0].DownloadMbps != 103 || phone[1].DownloadMbps != 100 || phone[0].Device != "phone" {
+		t.Fatalf("phone's results %+v, err %v", phone, err)
+	}
+	if all, _ := s.List(10, 0, ""); len(all) != 4 {
+		t.Fatalf("all devices: %d results", len(all))
+	}
+}
+
+// A database from before device ids keeps its results, with no device.
+func TestMigrateKeepsOlderResults(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "dyno.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{migrations[0], `PRAGMA user_version = 1`,
+		`INSERT INTO results (at, source, client, test_id, download_mbps, upload_mbps, idle_ms, loaded_down_ms, loaded_up_ms,
+			jitter_ms, streams, client_limited, bufferbloat_ms, grade, rpm, server_bytes_down, server_bytes_up)
+			VALUES (0, 'client', 'Edge on Windows', 'x', 880, 400, 1, 2, 3, 0.1, 5, 0, 2, 'A+', 20000, 0, 0)`} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	got, err := open(t, dir).List(10, 0, "")
+	if err != nil || len(got) != 1 || got[0].DownloadMbps != 880 || got[0].Device != "" {
+		t.Fatalf("after migration %+v, err %v", got, err)
 	}
 }

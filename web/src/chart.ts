@@ -1,7 +1,9 @@
-// The Speed over time panels: throughput and latency on their own axes over
-// one time scale, with gridlines, warm-up shading and a hover crosshair. Each
-// plot is an SVG stretched to its box (paths only, so stretching is safe) with
-// axis labels and the crosshair laid over it in HTML, positioned in percent.
+// The Speed over time panels: throughput and latency on their own axes, with
+// gridlines, warm-up shading and a hover crosshair. Wide screens get one time
+// scale for the whole test; narrow ones get a section per transfer, each on
+// its own time scale. Each plot is an SVG stretched to its box (paths only, so
+// stretching is safe) with axis labels and the crosshair laid over it in HTML,
+// positioned in percent.
 
 import type { Detail, Span } from "./types";
 
@@ -105,19 +107,22 @@ function series(cls: string, pts: [number, number][]): string {
 
 export interface Hover {
   t: number; // seconds
-  plot: "tp" | "lp"; // the plot the pointer is over, which holds the tooltip
+  plot: "tp" | "lp"; // the kind of plot the pointer is over, which holds the tooltip
 }
 
-/** Everything inside #ch. */
-export function draw(M: Model, hover: Hover | null): string {
-  const X = (t: number) => (t / M.T) * VW;
-  const xp = (t: number) => pct((t / M.T) * 100);
-  const yV = (mbps: number) => 100 - (M.conv(mbps) / M.vTop) * 100;
-  const yMs = (ms: number) => 100 - (ms / M.msTop) * 100;
+/** Everything inside #ch: one timeline for the whole test, or on narrow screens a section per transfer. */
+export function draw(M: Model, hover: Hover | null, phased = false): string {
+  return phased && M.spans.length ? M.spans.map((sp, i) => transfer(M, hover, sp, i)).join("") : timeline(M, hover);
+}
 
-  const [, xStep] = nice(M.T * (5 / 6));
+/** The x mapping, gridlines and time axis for a plot that runs from t0 to t1 seconds. */
+function frame(t0: number, t1: number) {
+  const w = Math.max(t1 - t0, 1e-6);
+  const at = (t: number) => ((t - t0) / w) * 100;
+  const X = (t: number) => ((t - t0) / w) * VW;
+  const [, xStep] = nice(w * (5 / 6));
   const xTicks: number[] = [];
-  for (let t = 0; t <= M.T + 1e-9; t += xStep) xTicks.push(t);
+  for (let k = Math.ceil(t0 / xStep - 1e-9); k * xStep <= t1 + 1e-9; k++) xTicks.push(k * xStep || 0); // || 0: no "-0 s"
   const grid = (step: number, top: number) => {
     let g = xTicks.map((t) => `<line class="ch-g" x1="${X(t).toFixed(1)}" x2="${X(t).toFixed(1)}" y1="0" y2="100"/>`).join("");
     for (let v = 0; v <= top + 1e-9; v += step) {
@@ -126,61 +131,82 @@ export function draw(M: Model, hover: Hover | null): string {
     }
     return g;
   };
-  const yLabels = (step: number, top: number) => {
-    let s = "";
-    for (let v = 0; v <= top + 1e-9; v += step) s += `<span class="ch-y" style="bottom:${pct((v / top) * 100)}">${tickText(v)}</span>`;
-    return s;
-  };
   const xAxis = `<div class="ch-xa" aria-hidden="true">${xTicks
     .map((t) => {
-      const at = (t / M.T) * 100;
-      const edge = at < 3 ? " first" : at > 97 ? " last" : "";
-      return `<span class="ch-xt${edge}" style="left:${pct(at)}">${tickText(t)} s</span>`;
+      const edge = at(t) < 3 ? " first" : at(t) > 97 ? " last" : "";
+      return `<span class="ch-xt${edge}" style="left:${pct(at(t))}">${tickText(t)} s</span>`;
     })
     .join("")}</div>`;
-  const marks = M.spans
-    .map(([, start, counted]) => {
-      let s = `<rect class="ch-warm" x="${X(start).toFixed(1)}" width="${Math.max(0, X(counted) - X(start)).toFixed(1)}" y="0" height="100"/>`;
-      if (start > 0.05) s += `<line class="ch-bound" x1="${X(start).toFixed(1)}" x2="${X(start).toFixed(1)}" y1="0" y2="100"/>`;
-      return s;
-    })
-    .join("");
-  const ref = (cls: string, x0: number, x1: number, y: number) =>
-    `<line class="ch-ref ${cls}" x1="${x0.toFixed(1)}" x2="${x1.toFixed(1)}" y1="${y.toFixed(2)}" y2="${y.toFixed(2)}"/>`;
+  const marks = (spans: Span[]) =>
+    spans
+      .map(([, start, counted]) => {
+        let s = `<rect class="ch-warm" x="${X(start).toFixed(1)}" width="${Math.max(0, X(counted) - X(start)).toFixed(1)}" y="0" height="100"/>`;
+        if (start > t0 + 0.05) s += `<line class="ch-bound" x1="${X(start).toFixed(1)}" x2="${X(start).toFixed(1)}" y1="0" y2="100"/>`;
+        return s;
+      })
+      .join("");
+  return { t0, t1, at, X, xp: (t: number) => pct(at(t)), grid, xAxis, marks };
+}
+
+type Frame = ReturnType<typeof frame>;
+
+/** One plot: the SVG stretched to its box, with axis labels, crosshair and tooltip over it. */
+function plot(M: Model, F: Frame, kind: Hover["plot"], svg: string, labels: string, step: number, top: number, hover: Hover | null): string {
+  let y = "";
+  for (let v = 0; v <= top + 1e-9; v += step) y += `<span class="ch-y" style="bottom:${pct((v / top) * 100)}">${tickText(v)}</span>`;
+  const cross = hover ? `<i class="ch-cross" style="left:${F.xp(hover.t)}"></i>` : "";
+  return `<div class="ch-plot" data-plot="${kind}" data-t0="${F.t0}" data-t1="${F.t1}" aria-hidden="true"><svg viewBox="0 0 ${VW} 100" preserveAspectRatio="none" aria-hidden="true">${svg}</svg>${y}${labels}${cross}${
+    hover?.plot === kind ? tooltip(M, hover.t, F.at(hover.t)) : ""
+  }</div>${F.xAxis}`;
+}
+
+const grad = (id: string) => `<linearGradient id="${id}" class="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="100"><stop offset="0"/><stop offset="1"/></linearGradient>`;
+const defs = `<defs>${grad("ch-gd")}${grad("ch-gu")}${grad("ch-gl")}</defs>`;
+const ref = (cls: string, x0: number, x1: number, y: number) =>
+  `<line class="ch-ref ${cls}" x1="${x0.toFixed(1)}" x2="${x1.toFixed(1)}" y1="${y.toFixed(2)}" y2="${y.toFixed(2)}"/>`;
+const yV = (M: Model, mbps: number) => 100 - (M.conv(mbps) / M.vTop) * 100;
+const yMs = (M: Model, ms: number) => 100 - (ms / M.msTop) * 100;
+
+/** The result line across the part of a transfer that counted, labelled at its end. */
+function result(M: Model, F: Frame, [dir, , counted, end]: Span): [string, string] {
+  const res = dir ? M.up : M.down;
+  if (!res) return ["", ""];
+  return [ref(dir ? "up" : "down", F.X(counted), F.X(end), yV(M, res)), `<span class="ch-rl end" style="left:${F.xp(end)};bottom:${pct(100 - yV(M, res))}">Result ${M.fmt(res)}</span>`];
+}
+
+/** The idle median as a reference line across a latency plot. */
+function idle(M: Model): [string, string] {
+  if (M.idleMs == null) return ["", ""];
+  return [ref("lat", 0, VW, yMs(M, M.idleMs)), `<span class="ch-rl" style="left:0;bottom:${pct(100 - yMs(M, M.idleMs))}">Idle ${M.fms(M.idleMs)}</span>`];
+}
+
+/** Throughput and latency over the whole test, download and upload side by side in time. */
+function timeline(M: Model, hover: Hover | null): string {
+  const F = frame(0, M.T);
+  const marks = F.marks(M.spans);
 
   // Throughput: each direction's line, and its result across the part that counted.
-  let tp = `<defs>${grad("ch-gd")}${grad("ch-gu")}${grad("ch-gl")}</defs>${grid(M.vStep, M.vTop)}${marks}`;
+  let tp = `${defs}${F.grid(M.vStep, M.vTop)}${marks}`;
   let tpLabels = "";
-  M.rate.forEach((r, dir) => (tp += series(dir ? "up" : "down", r.map(([t, v]) => [X(t), yV(v)]))));
-  for (const [dir, start, counted, end] of M.spans) {
-    tpLabels += `<span class="ch-ph" style="left:${xp(start)}">${dir ? "Upload" : "Download"}</span>`;
-    const res = dir ? M.up : M.down;
-    if (!res) continue;
-    tp += ref(dir ? "up" : "down", X(counted), X(end), yV(res));
-    tpLabels += `<span class="ch-rl end" style="left:${xp(end)};bottom:${pct(100 - yV(res))}">Result ${M.fmt(res)}</span>`;
+  M.rate.forEach((r, dir) => (tp += series(dir ? "up" : "down", r.map(([t, v]) => [F.X(t), yV(M, v)]))));
+  for (const sp of M.spans) {
+    tpLabels += `<span class="ch-ph" style="left:${F.xp(sp[1])}">${sp[0] ? "Upload" : "Download"}</span>`;
+    const [line, label] = result(M, F, sp);
+    tp += line;
+    tpLabels += label;
   }
 
   // Latency: probes under load, against the idle median as a reference.
-  let lp = `${grid(M.msStep, M.msTop)}${marks}`;
-  let lpLabels = "";
-  if (M.idleMs != null) {
-    lp += ref("lat", 0, VW, yMs(M.idleMs));
-    lpLabels += `<span class="ch-rl" style="left:0;bottom:${pct(100 - yMs(M.idleMs))}">Idle ${M.fms(M.idleMs)}</span>`;
-  }
-  for (const p of M.probes) lp += series("lat", p.map(([t, ms]) => [X(t), yMs(ms)]));
-
-  const cross = hover ? `<i class="ch-cross" style="left:${xp(hover.t)}"></i>` : "";
-  const plot = (cls: Hover["plot"], svg: string, labels: string, step: number, top: number) =>
-    `<div class="ch-plot" data-plot="${cls}" aria-hidden="true"><svg viewBox="0 0 ${VW} 100" preserveAspectRatio="none" aria-hidden="true">${svg}</svg>${yLabels(step, top)}${labels}${cross}${
-      hover?.plot === cls ? tooltip(M, hover.t) : ""
-    }</div>${xAxis}`;
+  const [idleLine, idleLabel] = idle(M);
+  let lp = `${F.grid(M.msStep, M.msTop)}${marks}${idleLine}`;
+  for (const p of M.probes) lp += series("lat", p.map(([t, ms]) => [F.X(t), yMs(M, ms)]));
 
   return `<div class="ch-panel"><div class="ch-head"><h2>Throughput</h2><span>${M.unit}</span></div>
-    ${plot("tp", tp, tpLabels, M.vStep, M.vTop)}
+    ${plot(M, F, "tp", tp, tpLabels, M.vStep, M.vTop, hover)}
     <table class="ch-lg named"><thead><tr><td></td><th scope="col">Result</th><th scope="col">Peak</th></tr></thead><tbody>
       ${legendRow("down", "Download", M.down, peak(M.rate[0]!))}${legendRow("up", "Upload", M.up, peak(M.rate[1]!))}</tbody></table></div>
   <div class="ch-panel"><div class="ch-head"><h2>Latency</h2><span>ms</span></div>
-    ${plot("lp", lp, lpLabels, M.msStep, M.msTop)}
+    ${plot(M, F, "lp", lp, idleLabel, M.msStep, M.msTop, hover)}
     <table class="ch-lg named"><thead><tr><td></td><th scope="col">Idle</th><th scope="col">Downloading</th><th scope="col">Uploading</th><th scope="col">Peak</th></tr></thead><tbody><tr>
       <th scope="row"><i class="ch-k lat"></i>Latency</th><td>${M.fms(M.idleMs)}</td><td>${M.fms(median(M.probes[0]!, M.spans, 0))}</td><td>${M.fms(median(M.probes[1]!, M.spans, 1))}</td><td>${M.fms(peak(M.probes.flat()))}</td></tr></tbody></table></div>`;
 
@@ -189,7 +215,38 @@ export function draw(M: Model, hover: Hover | null): string {
   }
 }
 
-const grad = (id: string) => `<linearGradient id="${id}" class="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="100"><stop offset="0"/><stop offset="1"/></linearGradient>`;
+/** One transfer on its own time axis: its speed, then the latency it caused. Phones read the test top to bottom this way. */
+function transfer(M: Model, hover: Hover | null, sp: Span, i: number): string {
+  const dir = sp[0];
+  const name = dir ? "Upload" : "Download";
+  const F = frame(sp[1], sp[3]);
+  // The crosshair and tooltip go in the section that holds the moment.
+  const here = hover && section(M, hover.t) === i ? hover : null;
+  // A sample can land just after the transfer ends; keep the line inside its plot.
+  const inside = <P extends [number, ...unknown[]]>(a: P[]) => a.filter((p) => p[0] <= sp[3]);
+
+  const [line, label] = result(M, F, sp);
+  const tp = `${i ? "" : defs}${F.grid(M.vStep, M.vTop)}${F.marks([sp])}${series(dir ? "up" : "down", inside(M.rate[dir]!).map(([t, v]) => [F.X(t), yV(M, v)]))}${line}`;
+  const [idleLine, idleLabel] = idle(M);
+  const lp = `${F.grid(M.msStep, M.msTop)}${F.marks([sp])}${idleLine}${series("lat", inside(M.probes[dir]!).map(([t, ms]) => [F.X(t), yMs(M, ms)]))}`;
+
+  return `<section class="ch-panel ch-phase" aria-label="${name}"><div class="ch-head"><h2><i class="ch-k ${dir ? "up" : "down"}"></i>${name}</h2><span>${M.unit}</span></div>
+    ${plot(M, F, "tp", tp, label, M.vStep, M.vTop, here)}
+    <table class="ch-lg"><thead><tr><th scope="col">Result</th><th scope="col">Peak</th></tr></thead><tbody><tr><td>${M.fmt(dir ? M.up : M.down)}</td><td>${M.fmt(peak(M.rate[dir]!))}</td></tr></tbody></table>
+    <div class="ch-head ch-sub"><h3><i class="ch-k lat"></i>Latency while ${dir ? "uploading" : "downloading"}</h3><span>ms</span></div>
+    ${plot(M, F, "lp", lp, idleLabel, M.msStep, M.msTop, here)}
+    <table class="ch-lg"><thead><tr><th scope="col">Loaded</th><th scope="col">Idle</th><th scope="col">Peak</th></tr></thead><tbody><tr><td>${M.fms(median(M.probes[dir]!, M.spans, dir))}</td><td>${M.fms(M.idleMs)}</td><td>${M.fms(peak(M.probes[dir]!))}</td></tr></tbody></table></section>`;
+}
+
+/** Which phase section a moment belongs to: the last one that has started by then. */
+function section(M: Model, t: number): number {
+  let i = 0;
+  M.spans.forEach((sp, k) => {
+    if (t >= sp[1]) i = k;
+  });
+  return i;
+}
+
 const peak = (a: [number, number, ...unknown[]][]) => (a.length ? Math.max(...a.map((p) => p[1])) : null);
 
 /** The median of a direction's probes after its warm-up, as the result counts them. */
@@ -201,11 +258,12 @@ function median(a: [number, number, 0 | 1][], spans: Span[], dir: 0 | 1): number
   return v.length % 2 ? v[h]! : (v[h - 1]! + v[h]!) / 2;
 }
 
-/** The sample time nearest t, so the crosshair lands on data rather than between it. */
-export function snap(M: Model, t: number): number | null {
-  if (!M.times.length) return null;
-  let best = M.times[0]!;
-  for (const x of M.times) if (Math.abs(x - t) < Math.abs(best - t)) best = x;
+/** The sample time nearest t, so the crosshair lands on data rather than between it. Only times from t0 to t1, the plot under the pointer, count. */
+export function snap(M: Model, t: number, t0 = 0, t1 = M.T): number | null {
+  const ts = M.times.filter((x) => x >= t0 - 1e-9 && x <= t1 + 1e-9);
+  if (!ts.length) return null;
+  let best = ts[0]!;
+  for (const x of ts) if (Math.abs(x - t) < Math.abs(best - t)) best = x;
   return best;
 }
 
@@ -236,11 +294,11 @@ export function describe(M: Model, t: number): string {
   return [`${tickText(Math.round(t * 10) / 10)} seconds, ${phase}`, r && `${M.fmt(r[1])} ${M.unit}`, p && `latency ${M.fms(p[1])} ms`].filter(Boolean).join(", ");
 }
 
-function tooltip(M: Model, t: number): string {
+function tooltip(M: Model, t: number, at: number): string {
   const { phase, r, p } = reading(M, t);
   const row = (cls: string, v: string, u: string) => `<li><i class="ch-k ${cls}"></i><b>${v}</b> ${u}</li>`;
-  const side = t / M.T > 0.6 ? "left" : "right";
-  return `<div class="ch-tip ${side}" style="left:${pct((t / M.T) * 100)}"><p>${tickText(Math.round(t * 10) / 10)} s, ${phase}</p><ul>${
+  const side = at > 60 ? "left" : "right";
+  return `<div class="ch-tip ${side}" style="left:${pct(at)}"><p>${tickText(Math.round(t * 10) / 10)} s, ${phase}</p><ul>${
     r ? row(r[2] ? "up" : "down", M.fmt(r[1]), M.unit) : ""
   }${p ? row("lat", M.fms(p[1]), "ms") : ""}</ul></div>`;
 }

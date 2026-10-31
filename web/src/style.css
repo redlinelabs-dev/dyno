@@ -50,7 +50,7 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 .setgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 22px }
 .field { display: grid; gap: 6px; align-content: start; border: 0; padding: 0; margin: 0; min-width: 0 }
 .field > label, .field > legend { font-size: 13px; color: var(--s-mute); padding: 0; margin-bottom: 6px }
-.field select, .field input[type="number"] { font: inherit; font-size: 15px; background: var(--s-input); color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 8px 10px; min-width: 0; width: 100% }
+.field select, .field input:is([type="number"], [type="text"]) { font: inherit; font-size: 15px; background: var(--s-input); color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 8px 10px; min-width: 0; width: 100% }
 .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--s-line); border-radius: 6px; overflow: hidden; width: fit-content }
 .seg label { position: relative; cursor: pointer; font-size: 14px }
 .seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
@@ -67,6 +67,17 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 .hist th { text-align: left; font-weight: 500; color: var(--s-mute); font-size: 12.5px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--s-line) }
 .hist td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--s-line); white-space: nowrap }
 .hist td.n { font-family: var(--f-num); font-weight: 700; font-size: 16px }
+.hscope { margin-bottom: 16px }
+.hist .dev { display: none }
+/* Phones: date over time, and the device under them rather than in a From
+   column, so the table fits without scrolling sideways. */
+@container stage (max-width: 480px) {
+  .hist { min-width: 0 }
+  .hist .from { display: none }
+  .hist td.when span { display: block }
+  .hist td.when .dev { margin-top: 3px; font-size: 12.5px; color: var(--s-mute); white-space: normal }
+  .hist :is(th, td):last-of-type { padding-right: 0 }
+}
 /* ---------- Speed over time: two panels on one time scale ---------- */
 .ch { display: grid; gap: 30px; border-radius: 4px; outline-offset: 8px }
 .ch-panel { display: grid; min-width: 0 }
@@ -112,6 +123,15 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 .ch-lg tbody th { font-weight: 500 }
 .ch-lg.named tr > :first-child { width: 100%; padding-left: 0; text-align: left }
 .ch-lg td { font-family: var(--f-num); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums }
+/* Phones: a section per transfer, its speed then the latency it caused. */
+.ch-phase + .ch-phase { padding-top: 26px; border-top: 1px solid var(--s-line) }
+.ch-phase .ch-plot { height: 150px }
+.ch-phase .ch-plot[data-plot="lp"] { height: 90px }
+.ch-head :is(h2, h3) .ch-k { width: 10px; height: 10px; border-radius: 2px }
+.ch-sub { margin-top: 24px }
+.ch-sub h3 { margin: 0; font-size: 13px; font-weight: 600 }
+.ch-phase .ch-lg { table-layout: fixed }
+.ch-phase .ch-lg :is(th, td) { padding: 6px 12px 6px 0; text-align: left }
 .gradebox { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center }
 .grade { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 14px; background: var(--red); color: var(--bone); font-family: var(--f-num); font-weight: 900; font-size: 50px; line-height: 1 }
 .gradebox p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--s-mute) }
@@ -121,7 +141,9 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 
 /* ---------- telemetry sheet ---------- */
 .sheet-wrap { position: fixed; inset: 0; z-index: 5; display: grid; align-items: end }
-.sheet-back { position: absolute; inset: 0; background: rgb(5 6 8 / .62); border: 0; padding: 0; cursor: default }
+.sheet-back { position: absolute; inset: 0; background: rgb(5 6 8 / .62); border: 0; padding: 0; cursor: default; touch-action: none }
+/* The page behind an open sheet stays put, on phones too. */
+html.sheet-open { overflow: hidden }
 .sheet { position: relative; justify-self: center; width: min(100%, 880px); max-height: 84dvh; overflow: auto; background: var(--s-panel); color: var(--bone); border: 1px solid var(--line); border-bottom: 0;
   border-radius: 20px 20px 0 0; padding: 10px max(18px, 3cqi) max(30px, env(safe-area-inset-bottom, 0px)); display: grid; gap: 18px; align-content: start; animation: sheet-up .22s ease-out; font-family: var(--f-ui) }
 @keyframes sheet-up { from { translate: 0 40px; opacity: 0 } }
@@ -138,6 +160,15 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
   .sheet, .sheet-wrap { grid-template-columns: minmax(0, 1fr) }
 }
 @container stage (max-width: 480px) { .tabs button { padding: 7px 10px } .tabs .long { display: none } .tabs .short { display: inline } }
+/* Phones: the sheet takes the screen at one height for every tab, so switching
+   tabs doesn't make it jump, and the tabs stay pinned while Speed scrolls. The
+   bottom padding clears Safari's toolbar and the home indicator. No bounce
+   inside the sheet: it would slide the content against a sheet being dragged
+   down to dismiss. */
+@media not ((min-width: 700px) and (min-height: 560px)) {
+  .sheet { height: calc(100dvh - 16px); max-height: none; overscroll-behavior: none; padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)) }
+  .sheet-head { position: sticky; top: -10px; z-index: 3; margin: -6px calc(-1 * max(18px, 3cqi)) 0; padding: 16px max(18px, 3cqi) 8px; background: var(--s-panel) }
+}
 /* Wide screens: a centred dialog rather than a sheet off the bottom edge (ADR-0013). */
 @media (min-width: 700px) and (min-height: 560px) {
   .sheet-wrap { align-items: center; padding: 24px }

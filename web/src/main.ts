@@ -18,9 +18,10 @@ interface Settings {
   streams: string; // "auto" or a count
   planDown: number; // Mbps; the dial's red zone starts here
   unit: "Mbps" | "MBps";
+  name: string; // this device's name in History; empty means the browser label
 }
 const KEY = "dyno.settings";
-const DEFAULTS: Settings = { profile: "standard", streams: "auto", planDown: 1000, unit: "Mbps" };
+const DEFAULTS: Settings = { profile: "standard", streams: "auto", planDown: 1000, unit: "Mbps", name: "" };
 const S: Settings = loadSettings();
 
 function loadSettings(): Settings {
@@ -28,6 +29,7 @@ function loadSettings(): Settings {
     const s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") };
     if (!(s.profile in PROFILES)) s.profile = DEFAULTS.profile;
     if (!(s.planDown > 0)) s.planDown = DEFAULTS.planDown;
+    if (typeof s.name !== "string") s.name = "";
     return s;
   } catch {
     return { ...DEFAULTS };
@@ -40,6 +42,29 @@ function saveSettings() {
     // Private mode or storage off: settings last for this visit only.
   }
 }
+
+// A random id this browser keeps for itself, so History can show its own tests
+// (ADR-0022). Made with getRandomValues: randomUUID needs HTTPS, and a LAN
+// server is often plain HTTP.
+const DEVICE = (() => {
+  const k = "dyno.device";
+  try {
+    const old = localStorage.getItem(k);
+    if (old && /^[\w-]{16,64}$/.test(old)) return old;
+  } catch {
+    // Storage off: fall through to a fresh id.
+  }
+  const id = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  try {
+    localStorage.setItem(k, id);
+  } catch {
+    // Storage off: this visit gets an id, the next one a new one.
+  }
+  return id;
+})();
 
 // ---------- state ----------
 type Status = "ready" | "running" | "done" | "failed";
@@ -74,6 +99,7 @@ const A = {
   warn: false,
   dial: 0, // displayed dial position, 0..1, eased toward the value
   hover: null as Hover | null, // Speed over time crosshair
+  histAll: false, // History shows every device, not just this one
 };
 
 const newRun = (): Run => ({
@@ -193,7 +219,7 @@ async function finish(run: Run, plan: Plan, summary: Summary, detail: Detail) {
     run.saved = await getJSON<StoredResult>(plan.endpoints.results.replace(/^\//, ""), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ test_id: plan.test_id, client: clientLabel(), ...summary, detail }),
+      body: JSON.stringify({ test_id: plan.test_id, client: S.name.trim() || clientLabel(), device: DEVICE, ...summary, detail }),
     });
   } catch (err) {
     note(`The result wasn't saved: ${(err as Error).message}`, true);
@@ -259,7 +285,7 @@ function busyOf(run: Run): number | null {
   return v > 0 ? v : null;
 }
 
-/** "Chrome on Android" and the like, for the History tab's From column. */
+/** "Chrome on Android" and the like: a device's name in History until it's given one. */
 function clientLabel(): string {
   const ua = navigator.userAgent;
   const browser = /Edg\//.test(ua)
@@ -498,6 +524,7 @@ function drawSheet(full: boolean) {
   const w = q("#sheet");
   w.hidden = !A.sheet;
   view.inert = !!A.sheet;
+  document.documentElement.classList.toggle("sheet-open", !!A.sheet);
   if (!A.sheet) return;
   w.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => {
     b.setAttribute("aria-selected", String(b.dataset.tab === A.sheet));
@@ -520,9 +547,65 @@ function openSheet(tab: Tab, opener?: HTMLElement) {
 function closeSheet() {
   A.sheet = null;
   drawSheet(false);
+  sheetEl.style.translate = sheetEl.style.transition = q(".sheet-back").style.opacity = "";
   A.opener?.focus({ preventScroll: true });
   A.opener = null;
 }
+
+// Phones: drag the sheet down from its top to dismiss it, as its grab handle
+// suggests. Close and Escape do the same without dragging (WCAG 2.5.7).
+const sheetEl = q(".sheet");
+const asDialog = matchMedia("(min-width: 700px) and (min-height: 560px)");
+let drag: { x: number; y: number; dy: number; at: number; v: number; on: boolean | null; tabs: boolean } | null = null;
+sheetEl.addEventListener(
+  "touchstart",
+  (e) => {
+    const t = e.touches[0]!;
+    // The tab strip also scrolls sideways, so a drag there waits a few pixels to show which way it goes.
+    const tabs = !!(e.target as Element).closest(".tabs");
+    drag = e.touches.length === 1 && !asDialog.matches ? { x: t.clientX, y: t.clientY, dy: 0, at: e.timeStamp, v: 0, on: null, tabs } : null;
+  },
+  { passive: true },
+);
+sheetEl.addEventListener(
+  "touchmove",
+  (e) => {
+    if (!drag) return;
+    const t = e.touches[0]!;
+    const dx = t.clientX - drag.x;
+    const dy = t.clientY - drag.y;
+    if (drag.on === null) {
+      // Only a downward drag that starts with the sheet scrolled to the top; anything else scrolls as usual.
+      // Elsewhere it is decided on the first move: Safari ignores preventDefault once its own scroll has begun.
+      if (drag.tabs ? Math.hypot(dx, dy) < 6 : !dx && !dy) return;
+      drag.on = dy > 0 && dy >= Math.abs(dx) && sheetEl.scrollTop <= 0;
+      if (!drag.on) return void (drag = null);
+    }
+    e.preventDefault();
+    const d = Math.max(0, dy);
+    drag.v = (d - drag.dy) / Math.max(1, e.timeStamp - drag.at);
+    drag.dy = d;
+    drag.at = e.timeStamp;
+    sheetEl.style.transition = "none";
+    sheetEl.style.translate = `0 ${d}px`;
+    q(".sheet-back").style.opacity = String(1 - Math.min(1, d / sheetEl.offsetHeight));
+  },
+  { passive: false },
+);
+const dragEnd = () => {
+  if (!drag?.on) return void (drag = null);
+  const { dy, v } = drag;
+  drag = null;
+  const away = dy > Math.min(140, sheetEl.offsetHeight / 4) || (dy > 40 && v > 0.5);
+  const ms = reduceMotion.matches ? 0 : away ? 160 : 200;
+  sheetEl.style.transition = `translate ${ms}ms ease-out`;
+  sheetEl.style.translate = away ? "0 100%" : "";
+  q(".sheet-back").style.opacity = away ? "0" : "";
+  if (away) setTimeout(closeSheet, ms);
+  else setTimeout(() => (sheetEl.style.transition = ""), ms);
+};
+sheetEl.addEventListener("touchend", dragEnd);
+sheetEl.addEventListener("touchcancel", dragEnd);
 
 function drawLatency(b: HTMLElement, full: boolean) {
   const run = A.run;
@@ -599,19 +682,24 @@ function drawSpeed(b: HTMLElement, full: boolean) {
 }
 
 let chart: Model | null = null;
+// Phones read the chart a transfer at a time, in the order the test ran (ADR-0012).
+const narrow = matchMedia("(max-width: 599px)");
+narrow.addEventListener("change", drawChart);
 function drawChart() {
   const el = stage.querySelector("#ch");
   if (!el || !chart) return;
-  el.innerHTML = draw(chart, A.hover);
+  el.innerHTML = draw(chart, A.hover, narrow.matches);
   const key = stage.querySelector("#ch-key")!;
   key.setAttribute("aria-valuemax", chart.T.toFixed(1));
   key.setAttribute("aria-valuenow", (A.hover?.t ?? 0).toFixed(1));
   key.setAttribute("aria-valuetext", A.hover ? describe(chart, A.hover.t) : "No moment chosen");
 }
 
+/** A row of radio buttons that look like a segmented control. */
+const seg = (name: string, opts: [string, string][], cur: string) =>
+  `<div class="seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}"${cur === v ? " checked" : ""}><span>${l}</span></label>`).join("")}</div>`;
+
 function setupBody(): string {
-  const seg = (name: string, opts: [string, string][], cur: string) =>
-    `<div class="seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}"${cur === v ? " checked" : ""}><span>${l}</span></label>`).join("")}</div>`;
   const opt = (o: [string, string][], cur: string) => o.map(([v, l]) => `<option value="${v}"${cur === v ? " selected" : ""}>${l}</option>`).join("");
   const has = !!(A.run?.saved || A.run?.summary);
   return `<div class="pnlx"><div class="setgrid">
@@ -631,6 +719,7 @@ function setupBody(): string {
       S.streams,
     )}</select><p class="note">Auto uses what the server's plan asks for, 5 by default. One connection shows what a single download gets.</p></div>
     <div class="field"><label for="set-plan">Your plan's download speed (Mbps)</label><input type="number" id="set-plan" min="1" value="${S.planDown}"><p class="note">The red zone starts here, so reaching it means you get what you pay for.</p></div>
+    <div class="field"><label for="set-name">This device's name</label><input type="text" id="set-name" maxlength="80" autocomplete="off" spellcheck="false" placeholder="${esc(clientLabel())}" value="${esc(S.name)}"><p class="note">History shows it beside this device's tests. Left empty, it's ${esc(clientLabel())}.</p></div>
     <fieldset class="field"><legend>Units</legend>${seg(
       "set-unit",
       [
@@ -644,27 +733,56 @@ function setupBody(): string {
 }
 
 async function drawHistory(b: HTMLElement) {
-  b.innerHTML = `<div class="pnlx"><p class="note">Loading…</p></div>`;
+  // The switch stays put while the list reloads, so keyboard focus survives a change of view.
+  if (!b.querySelector("#hist-list")) {
+    b.innerHTML = `<div class="pnlx"><fieldset class="field hscope"><legend class="sr">Show tests from</legend>${seg(
+      "hist-scope",
+      [
+        ["mine", "This device"],
+        ["all", "All devices"],
+      ],
+      A.histAll ? "all" : "mine",
+    )}</fieldset><div id="hist-list"></div></div>`;
+  }
+  const out = b.querySelector<HTMLElement>("#hist-list")!;
+  const all = A.histAll;
+  out.innerHTML = `<p class="note">Loading…</p>`;
   let list: StoredResult[];
   try {
-    list = (await getJSON<{ results: StoredResult[] }>("api/v1/results?limit=50")).results;
+    list = (await getJSON<{ results: StoredResult[] }>(`api/v1/results?limit=50${all ? "" : `&device=${DEVICE}`}`)).results;
   } catch (err) {
-    if (A.sheet === "history") b.innerHTML = `<div class="pnlx"><p class="note">Couldn't load history: ${esc((err as Error).message)}</p></div>`;
+    if (A.sheet === "history" && A.histAll === all) out.innerHTML = `<p class="note">Couldn't load history: ${esc((err as Error).message)}</p>`;
     return;
   }
-  if (A.sheet !== "history") return;
+  if (A.sheet !== "history" || A.histAll !== all) return;
   if (!list.length) {
-    b.innerHTML = `<div class="pnlx"><p class="note">No tests yet. Every test run against this server shows up here.</p></div>`;
+    out.innerHTML = `<p class="note">${
+      all ? "No tests yet. Every test run against this server shows up here." : "No tests from this device yet. Tests from your other devices are under All devices."
+    }</p>`;
     return;
   }
-  const when = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const from = (r: StoredResult) => (r.source === "client" ? r.client || "Browser" : r.source === "schedule" ? "Scheduled" : r.source);
-  b.innerHTML = `<div class="pnlx"><div class="tw" role="region" aria-label="Test history" tabindex="0"><table class="hist"><thead><tr><th>When</th><th>Down (${unit()})</th><th>Up (${unit()})</th><th>Latency</th><th>Grade</th><th>From</th></tr></thead><tbody>${list
+  // Date and time as two spans, so a phone can stack them in a narrow column.
+  const when = (iso: string) => {
+    const d = new Date(iso);
+    return `<span>${esc(d.toLocaleDateString(undefined, { month: "short", day: "numeric" }))},</span> <span>${esc(
+      d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
+    )}</span>`;
+  };
+  const from = (r: StoredResult) =>
+    (r.source === "client" ? r.client || "Browser" : r.source === "schedule" ? "Scheduled" : r.source) + (r.device === DEVICE ? " (this device)" : "");
+  // All devices names each row's device: in its own column, or under the time on a phone.
+  out.innerHTML = `<div class="tw" role="region" aria-label="Test history" tabindex="0"><table class="hist"><thead><tr><th>When</th><th>Down</th><th>Up</th><th>Latency</th><th>Grade</th>${
+    all ? `<th class="from">From</th>` : ""
+  }</tr></thead><tbody>${list
     .map(
       (r) =>
-        `<tr><td>${esc(when(r.at))}</td><td class="n">${fmt(r.download_mbps)}</td><td class="n">${fmt(r.upload_mbps)}</td><td class="n">${fms(r.idle_ms)} ms</td><td>${esc(r.grade || "–")}</td><td>${esc(from(r))}</td></tr>`,
+        `<tr><td class="when">${when(r.at)}${all ? `<span class="dev">${esc(from(r))}</span>` : ""}</td><td class="n">${fmt(r.download_mbps)}</td><td class="n">${fmt(
+          r.upload_mbps,
+        )}</td><td class="n">${fms(r.idle_ms)} ms</td><td>${esc(r.grade || "–")}</td>${all ? `<td class="from">${esc(from(r))}</td>` : ""}</tr>`,
     )
-    .join("")}</tbody></table></div><p class="note">Every test run against this server, newest first. Latency is idle latency.</p></div>`;
+    .join("")}</tbody></table></div><p class="note">${
+    all ? "Every test run against this server" : `Tests from this device (${esc(S.name || clientLabel())})`
+  }, newest first. Speeds in ${unit()}; latency is idle latency.</p>`;
 }
 
 function resultJSON(): string {
@@ -696,9 +814,15 @@ stage.addEventListener("click", async (e) => {
 
 stage.addEventListener("change", (e) => {
   const t = e.target as HTMLInputElement;
+  if (t.name === "hist-scope") {
+    A.histAll = t.value === "all";
+    drawHistory(q("#sheet-body"));
+    return;
+  }
   if (t.name === "set-prof") S.profile = t.value as Profile;
   else if (t.name === "set-unit") S.unit = t.value as Settings["unit"];
   else if (t.id === "set-streams") S.streams = t.value;
+  else if (t.id === "set-name") S.name = t.value.trim();
   else if (t.id === "set-plan") {
     S.planDown = Math.max(1, Number(t.value) || DEFAULTS.planDown);
     q("#f-zone").setAttribute("d", zone());
@@ -712,7 +836,9 @@ stage.addEventListener("pointermove", (e) => {
   const p = (e.target as Element).closest<HTMLElement>("[data-plot]");
   if (!chart || !p) return;
   const r = p.getBoundingClientRect();
-  const t = snap(chart, ((e.clientX - r.left) / r.width) * chart.T);
+  const t0 = Number(p.dataset.t0);
+  const t1 = Number(p.dataset.t1);
+  const t = snap(chart, t0 + ((e.clientX - r.left) / r.width) * (t1 - t0), t0, t1);
   A.hover = t == null ? null : { t, plot: p.dataset.plot as Hover["plot"] };
   drawChart();
 });

@@ -69,6 +69,8 @@ func TestResultErrors(t *testing.T) {
 		{"GET", "/api/v1/results/abc", "", 400},
 		{"GET", "/api/v1/results?limit=0", "", 400},
 		{"GET", "/api/v1/results?before=x", "", 400},
+		{"GET", "/api/v1/results?device=a%20b", "", 400},
+		{"POST", "/api/v1/results", `{"device":"has spaces"}`, 400},
 	} {
 		if w := do(mux, c.method, c.path, c.body); w.Code != c.status {
 			t.Errorf("%s %s: status %d, want %d (%s)", c.method, c.path, w.Code, c.status, w.Body)
@@ -168,5 +170,21 @@ func TestStoreEventOnFailure(t *testing.T) {
 	ev := oneEvent(t, logs)
 	if ev["level"] != "ERROR" || ev["error.code"] != "store_write_failed" || ev["result"] != "failed" {
 		t.Errorf("store failure: %v", ev)
+	}
+}
+
+func TestListResultsForOneDevice(t *testing.T) {
+	mux, _ := newMux(t)
+	for _, dev := range []string{"Kq3-x_9", "other", "Kq3-x_9"} {
+		body := strings.Replace(strings.Replace(submission, "%s", "t", 1), `"client":`, `"device":"`+dev+`","client":`, 1)
+		if w := do(mux, "POST", "/api/v1/results", body); w.Code != 201 {
+			t.Fatalf("post: %d %s", w.Code, w.Body)
+		}
+	}
+	w := do(mux, "GET", "/api/v1/results?device=Kq3-x_9", "")
+	var page struct{ Results []result.Result }
+	json.Unmarshal(w.Body.Bytes(), &page)
+	if w.Code != 200 || len(page.Results) != 2 || page.Results[0].Device != "Kq3-x_9" {
+		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 }

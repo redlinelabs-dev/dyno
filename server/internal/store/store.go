@@ -72,6 +72,10 @@ var migrations = []string{
 		detail            TEXT -- JSON samples for the charts
 	);
 	CREATE INDEX results_at ON results(at);`,
+	// 2: the device a result came from, for History's "This device" (ADR-0022).
+	// Results from before it have none.
+	`ALTER TABLE results ADD COLUMN device TEXT NOT NULL DEFAULT '';
+	CREATE INDEX results_device ON results(device, id);`,
 }
 
 func migrate(db *sql.DB) error {
@@ -100,7 +104,7 @@ func migrate(db *sql.DB) error {
 }
 
 // columns are in scanTargets order; insertColumns is the same minus id.
-const insertColumns = `at, source, client, test_id, download_mbps, upload_mbps, idle_ms,
+const insertColumns = `at, source, client, device, test_id, download_mbps, upload_mbps, idle_ms,
 	loaded_down_ms, loaded_up_ms, jitter_ms, streams, client_limited, bufferbloat_ms, grade, rpm,
 	server_bytes_down, server_bytes_up`
 
@@ -113,8 +117,8 @@ func (s *Store) Add(r result.Result) (result.Result, error) {
 		detail = string(r.Detail)
 	}
 	res, err := s.db.Exec(`INSERT INTO results (`+insertColumns+`, detail)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.At.UnixMilli(), r.Source, r.Client, r.TestID, r.DownloadMbps, r.UploadMbps, r.IdleMs,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.At.UnixMilli(), r.Source, r.Client, r.Device, r.TestID, r.DownloadMbps, r.UploadMbps, r.IdleMs,
 		r.LoadedDownMs, r.LoadedUpMs, r.JitterMs, r.Streams, r.ClientLimited, r.BufferbloatMs, r.Grade, r.RPM,
 		r.ServerBytesDown, r.ServerBytesUp, detail)
 	if err != nil {
@@ -125,12 +129,16 @@ func (s *Store) Add(r result.Result) (result.Result, error) {
 }
 
 // List returns up to limit results older than id before (0 for the newest),
-// newest first, without detail.
-func (s *Store) List(limit int, before int64) ([]result.Result, error) {
+// newest first, without detail. A device other than "" keeps only its results.
+func (s *Store) List(limit int, before int64, device string) ([]result.Result, error) {
 	if before <= 0 {
 		before = 1<<63 - 1
 	}
-	rows, err := s.db.Query(`SELECT `+columns+` FROM results WHERE id < ? ORDER BY id DESC LIMIT ?`, before, limit)
+	q, args := `SELECT `+columns+` FROM results WHERE id < ?`, []any{before}
+	if device != "" {
+		q, args = q+` AND device = ?`, append(args, device)
+	}
+	rows, err := s.db.Query(q+` ORDER BY id DESC LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +170,7 @@ func (s *Store) Get(id int64) (result.Result, error) {
 }
 
 func scanTargets(r *result.Result) []any {
-	return []any{&r.ID, (*unixMillis)(&r.At), &r.Source, &r.Client, &r.TestID, &r.DownloadMbps, &r.UploadMbps, &r.IdleMs,
+	return []any{&r.ID, (*unixMillis)(&r.At), &r.Source, &r.Client, &r.Device, &r.TestID, &r.DownloadMbps, &r.UploadMbps, &r.IdleMs,
 		&r.LoadedDownMs, &r.LoadedUpMs, &r.JitterMs, &r.Streams, &r.ClientLimited, &r.BufferbloatMs, &r.Grade, &r.RPM,
 		&r.ServerBytesDown, &r.ServerBytesUp}
 }

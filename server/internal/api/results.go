@@ -106,7 +106,8 @@ func (a *API) logStore(ctx context.Context, start time.Time, status int, res *re
 }
 
 // listResults returns {"results": [...]}, newest first. ?limit=N (default 50,
-// at most 500) and ?before=<id> page backwards.
+// at most 500) and ?before=<id> page backwards; ?device=<id> keeps one
+// device's results.
 func (a *API) listResults(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	q := r.URL.Query()
@@ -127,7 +128,12 @@ func (a *API) listResults(w http.ResponseWriter, r *http.Request) {
 		}
 		before = n
 	}
-	list, err := a.Store.List(limit, before)
+	device := q.Get("device")
+	if !result.ValidDevice(device) {
+		writeError(w, http.StatusBadRequest, "device must be up to 64 letters, digits, - or _")
+		return
+	}
+	list, err := a.Store.List(limit, before, device)
 	if err != nil {
 		a.log().LogAttrs(r.Context(), slog.LevelError, "result.list",
 			slog.String("result", "failed"),

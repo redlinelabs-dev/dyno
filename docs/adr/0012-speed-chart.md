@@ -32,6 +32,19 @@ scale.
   `detail.spans` (`[dir, start, counted, end]`, seconds), so saved results
   carry their own phase marks. Results without spans get phase extents from
   their samples and no warm-up shading.
+- **Phones read it a transfer at a time** (amended 2026-10-31). The owner
+  found the shared timeline "disconnected somewhat from a 'flow' perspective
+  on mobile" and picked this layout. Below 600 px of viewport width the tab
+  shows a Download section, then an Upload section, in the order the test
+  ran. Each section has:
+  - its own time axis, from the start of the transfer to its end;
+  - its throughput plot with Result and Peak under it;
+  - a "Latency while downloading" (or uploading) plot with Loaded, Idle and
+    Peak under it.
+
+  Both sections keep the same y scales, so their heights compare. The
+  crosshair, tooltip and arrow keys work as on the wide layout. The crosshair
+  shows in the section that holds the moment.
 
 ## Consequences
 

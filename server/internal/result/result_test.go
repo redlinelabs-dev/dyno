@@ -2,6 +2,7 @@ package result
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -33,7 +34,7 @@ func TestDeriveWithoutLoadedLatency(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	for _, bad := range []Submission{{DownloadMbps: -1}, {IdleMs: math.NaN()}, {UploadMbps: math.Inf(1)}, {Streams: 99}} {
+	for _, bad := range []Submission{{DownloadMbps: -1}, {IdleMs: math.NaN()}, {UploadMbps: math.Inf(1)}, {Streams: 99}, {Device: "a b"}, {Device: strings.Repeat("x", 65)}} {
 		if bad.Validate() == nil {
 			t.Errorf("accepted %+v", bad)
 		}

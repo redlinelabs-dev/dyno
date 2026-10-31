@@ -15,6 +15,7 @@ import (
 type Submission struct {
 	TestID        string          `json:"test_id"`
 	Client        string          `json:"client"`
+	Device        string          `json:"device"` // the client's own opaque id for itself, so History can show one device's tests
 	DownloadMbps  float64         `json:"download_mbps"`
 	UploadMbps    float64         `json:"upload_mbps"`
 	IdleMs        float64         `json:"idle_ms"`
@@ -42,6 +43,23 @@ type Result struct {
 
 const maxClientLen = 80
 
+// MaxDeviceLen caps a device id. Ids are letters, digits, "-" and "_", which
+// keeps them safe in a query string without escaping.
+const MaxDeviceLen = 64
+
+// ValidDevice reports whether id can be a device id. Empty means no device.
+func ValidDevice(id string) bool {
+	if len(id) > MaxDeviceLen {
+		return false
+	}
+	for _, c := range []byte(id) {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // Validate rejects submissions no honest client sends.
 func (s *Submission) Validate() error {
 	for _, v := range []float64{s.DownloadMbps, s.UploadMbps, s.IdleMs, s.LoadedDownMs, s.LoadedUpMs, s.JitterMs} {
@@ -51,6 +69,9 @@ func (s *Submission) Validate() error {
 	}
 	if s.Streams < 0 || s.Streams > 64 {
 		return errors.New("streams out of range")
+	}
+	if !ValidDevice(s.Device) {
+		return errors.New("device must be up to 64 letters, digits, - or _")
 	}
 	if len(s.Client) > maxClientLen {
 		s.Client = strings.ToValidUTF8(s.Client[:maxClientLen], "")
