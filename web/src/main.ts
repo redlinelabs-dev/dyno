@@ -3,6 +3,7 @@
 // server only through the public API in docs/api.md (ADR-0002).
 
 import { ARC, CL, P, faceSVG, gaugeG, logMap, setNeedle } from "./gauge";
+import { describe, draw, model, snap, step, type Hover, type Model } from "./chart";
 import type { Detail, Phase, Plan, StartMsg, StoredResult, Summary, WorkerMsg } from "./types";
 
 // ---------- settings ----------
@@ -72,6 +73,7 @@ const A = {
   msg: "",
   warn: false,
   dial: 0, // displayed dial position, 0..1, eased toward the value
+  hover: null as Hover | null, // Speed over time crosshair
 };
 
 const newRun = (): Run => ({
@@ -100,6 +102,7 @@ async function start() {
   A.run = run;
   A.status = "running";
   note("");
+  announce("Speed test running.");
   update();
 
   let plan: Plan;
@@ -134,6 +137,7 @@ function onWorker(run: Run, plan: Plan, m: WorkerMsg) {
     case "phase":
       run.phase = m.phase;
       run.live = 0;
+      if (m.span) d.spans = [...(d.spans ?? []), m.span];
       break;
     case "idle":
       run.idleMs = m.median;
@@ -151,6 +155,7 @@ function onWorker(run: Run, plan: Plan, m: WorkerMsg) {
       d.probes.push([m.t, m.ms, m.dir === "download" ? 0 : 1]);
       break;
     case "direction-done":
+      if (m.dir === "download") announce(`Download ${fmt(m.mbps)} ${unitWords()}. Measuring upload.`);
       if (m.dir === "download") [run.down, run.loadedDown] = [m.mbps, m.loaded_ms];
       else [run.up, run.loadedUp] = [m.mbps, m.loaded_ms];
       break;
@@ -178,10 +183,10 @@ async function finish(run: Run, plan: Plan, summary: Summary, detail: Detail) {
     loadedUp: summary.loaded_up_ms,
   });
   A.status = "done";
-  if (summary.client_limited) note("This device was working hard during the test and may have held the result back. A faster device may measure higher.", true);
+  if (summary.client_limited) note("This device was busy during the test and may have held the result back.", true);
   announce(
     `Test done. Download ${fmt(summary.download_mbps)} ${unitWords()}, upload ${fmt(summary.upload_mbps)}. ` +
-      `Latency ${fms(summary.idle_ms)} milliseconds idle, ${fms(busyOf(run))} when busy.`,
+      `Latency ${fms(summary.idle_ms)} milliseconds idle, ${fms(busyOf(run))} when busy.${summary.client_limited ? " " + A.msg : ""}`,
   );
   update(true);
   try {
@@ -202,6 +207,16 @@ function fail(message: string) {
   A.status = "failed";
   note(message, true);
   announce(message);
+  update(true);
+}
+
+/** The Stop button: anything that starts on its own and moves for this long must be stoppable (WCAG 2.2.2). */
+function stop() {
+  stopWorker();
+  if (A.run) A.run.live = 0;
+  A.status = "failed";
+  note("Test stopped. Press Test again to run it.");
+  announce("Test stopped.");
   update(true);
 }
 
@@ -309,7 +324,8 @@ const TABS: [Tab, string, string][] = [
 
 const stage = document.getElementById("stage")!;
 stage.innerHTML = `<div class="v" id="view">
-  <header class="v-top"><span class="v-logo"><span class="v-brand">DYNO<b>/</b></span><span class="v-by">by Redline Labs</span></span><span class="v-host">This server (${esc(location.host)})</span></header>
+  <header class="v-top"><h1 class="v-logo"><span class="v-brand" aria-hidden="true">DYNO<b>/</b></span><span class="sr">dyno speed test</span><span class="v-by">by Redline Labs</span></h1><span class="v-host">This server (${esc(location.host)})</span></header>
+  <div class="v-main"><div class="fit">
   <div class="f-dial"><svg viewBox="0 0 400 310" aria-hidden="true">
     <path class="f-zone" id="f-zone" d="${zone()}"/><path class="f-track" d="${TRACK}"/>
     <path class="f-fill" id="f-fill" d="${TRACK}" pathLength="1" stroke-dasharray="0 1"/>
@@ -320,27 +336,76 @@ stage.innerHTML = `<div class="v" id="view">
         return `<text class="f-lab" x="${x.toFixed(1)}" y="${y.toFixed(1)}">${["1", "10", "100", "1G", "10G"][i]}</text>`;
       })
       .join("")}
+    <line class="f-mark" id="f-mark" x1="0" y1="0" x2="0" y2="0"/>
     <circle class="f-tip" id="f-tip" r="10" cx="0" cy="0"/></svg>
-    <div class="f-center"><span class="f-phase"><i></i><span id="f-ph">Download speed</span></span><span class="f-val" id="f-val">–</span><span class="f-unit" id="f-unit">Mbps</span></div>
+    <div class="f-center"><span class="f-phase"><i></i><span id="f-ph">Download speed</span></span><span class="f-val none" id="f-val">–</span><span class="f-unit" id="f-unit">Mbps</span></div>
   </div>
-  <div class="f-sub">
-    <button class="chip" data-sheet="latency" aria-label="Latency, open details"><span>Latency</span><b id="f-li">–</b><span>ms idle</span><i class="sep"></i><b id="f-lb">–</b><span>ms busy</span></button>
-    <button class="chip" data-sheet="speed" aria-label="Upload, open details"><span>Upload</span><b id="f-u">–</b><span id="f-uu">Mbps</span></button>
+  <div class="read">
+    <button class="rg lat" data-sheet="latency" aria-haspopup="dialog"><span class="rg-h">Latency</span>
+      <span class="rv"><span class="rl">Idle</span><span class="rn"><b id="f-li" class="none">–</b><small>ms</small></span></span>
+      <span class="rv"><span class="rl">Busy</span><span class="rn"><b id="f-lb" class="none">–</b><small>ms</small></span></span></button>
+    <button class="rg up" data-sheet="speed" aria-haspopup="dialog"><span class="rg-h">Upload</span>
+      <span class="rv"><span class="rl"></span><span class="rn"><b id="f-u" class="wide none">–</b><small id="f-uu">Mbps</small></span></span></button>
   </div>
-  <div class="f-act"><button class="go" id="f-go">Start test</button><button class="tele-link" data-sheet="latency">Telemetry</button></div>
-  <p class="f-msg" id="f-msg" hidden></p>
+  <div class="f-act"><button class="go" id="f-go">Start test</button><button class="tele-link" data-sheet="latency" aria-haspopup="dialog">Telemetry</button></div>
+  <p class="f-msg" id="f-msg"></p>
+  </div></div>
 </div>
-<div class="sheet-wrap" id="sheet" hidden><button class="sheet-back" data-close aria-label="Close telemetry" tabindex="-1"></button>
+<div class="sheet-wrap" id="sheet" hidden><div class="sheet-back" data-close></div>
   <section class="sheet" role="dialog" aria-modal="true" aria-label="Telemetry"><div class="sheet-grab"></div>
     <div class="sheet-head"><div class="tabs" role="tablist">${TABS.map(
-      ([k, long, short]) => `<button role="tab" data-tab="${k}"><span class="long">${long}</span><span class="short">${short}</span></button>`,
+      ([k, long, short]) =>
+        `<button role="tab" id="tab-${k}" aria-controls="sheet-body" data-tab="${k}"><span class="long">${long}</span><span class="short">${short}</span></button>`,
     ).join("")}</div><button class="sheet-x" data-close>Close</button></div>
-    <div id="sheet-body"></div></section></div>
+    <div id="sheet-body" role="tabpanel" tabindex="0"></div></section></div>
 <p class="sr" id="live" aria-live="polite"></p>`;
 
 const view = document.getElementById("view")!;
 const q = <T extends Element = HTMLElement>(sel: string) => stage.querySelector<T>(sel)!;
-q<HTMLButtonElement>("#f-go").onclick = start;
+q<HTMLButtonElement>("#f-go").onclick = () => (A.status === "running" ? stop() : start());
+
+/**
+ * Scales the fast lane (dial, readouts, actions) to the largest size that fits
+ * under the header (ADR-0016). Small labels have minimum sizes, so the
+ * composition's shape changes as it shrinks; a bisection finds the scale. On
+ * short, wide screens (a phone on its side) the readouts may sit beside the
+ * dial instead of under it, whichever gives the bigger dial.
+ */
+const fitEl = q(".fit");
+const mainEl = q(".v-main");
+function fit() {
+  const { width: W, height: H } = mainEl.getBoundingClientRect();
+  const scale = (row: boolean) => {
+    fitEl.classList.toggle("row", row);
+    const fits = (p: number) => {
+      fitEl.style.setProperty("--p", `${p}px`);
+      const w = Math.max(...[fitEl, ...fitEl.children].map((e) => e.getBoundingClientRect().width));
+      return w <= W && fitEl.getBoundingClientRect().height <= H;
+    };
+    let [lo, hi] = [0.2, Math.max(0.2, W / 540)];
+    for (let i = 0; i < 14; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const col = scale(false);
+  const row = W > H * 1.5 ? scale(true) : 0;
+  const useRow = row > col * 1.1;
+  fitEl.classList.toggle("row", useRow);
+  fitEl.style.setProperty("--p", `${useRow ? row : col}px`);
+}
+new ResizeObserver(fit).observe(mainEl);
+document.fonts?.ready.then(fit);
+
+/** Writes a live number with each digit in a fixed-width box (.tn), so it doesn't wobble as it changes. */
+function setNum(el: Element, text: string) {
+  if (el.getAttribute("data-v") === text) return;
+  el.setAttribute("data-v", text);
+  el.innerHTML = `<span aria-hidden="true">${text.replace(/\d/g, '<span class="tn">$&</span>')}</span><span class="sr">${text === "–" ? "none yet" : text}</span>`;
+  el.classList.toggle("none", text === "–"); // no value yet: dim, so it doesn't read as one
+}
 
 function note(msg: string, warn = false) {
   A.msg = msg;
@@ -380,12 +445,14 @@ function dialValue(): number {
   const run = A.run;
   if (!run) return 0;
   if (run.phase === "download") return run.live;
+  if (run.phase === "upload" && A.status === "running") return run.live;
   if (run.phase === "latency") return 0;
   return run.down ?? 0;
 }
+const uploading = () => A.run?.phase === "upload" && A.status === "running";
 
 function drawDial(f: number) {
-  const fp = logMap(S.planDown);
+  const fp = uploading() ? 1 : logMap(S.planDown); // the plan zone is a download speed
   q("#f-fill").setAttribute("stroke-dasharray", `${Math.min(f, fp).toFixed(4)} 1`);
   q("#f-over").setAttribute("stroke-dasharray", f > fp ? `0 ${fp.toFixed(4)} ${(f - fp).toFixed(4)} 1` : "0 1");
   const [tx, ty] = P(FCX, FCY, FR, -120 + 240 * f);
@@ -398,20 +465,30 @@ function render() {
   const running = A.status === "running";
   const phase = run?.phase;
   view.classList.toggle("running", running);
-  q("#f-ph").textContent = !running ? "Download speed" : phase === "latency" ? "Connecting" : phase === "download" ? "Measuring download" : "Download speed";
+  q(".f-dial").classList.toggle("up", uploading());
+  q("#f-ph").textContent = !running ? "Download speed" : phase === "latency" ? "Connecting" : phase === "download" ? "Measuring download" : "Measuring upload";
+  const mark = q("#f-mark");
+  if (uploading() && run?.down) {
+    const a = fAng(run.down);
+    const [x1, y1] = P(FCX, FCY, FR - 15, a);
+    const [x2, y2] = P(FCX, FCY, FR + 15, a);
+    mark.setAttribute("x1", x1.toFixed(1));
+    mark.setAttribute("y1", y1.toFixed(1));
+    mark.setAttribute("x2", x2.toFixed(1));
+    mark.setAttribute("y2", y2.toFixed(1));
+  }
+  mark.classList.toggle("on", uploading() && !!run?.down);
   const val = q("#f-val");
-  val.textContent = !run ? "–" : phase === "latency" ? (running ? "0" : "–") : fmt(dialValue());
-  val.classList.toggle("long", val.textContent.length > 3); // multi-gigabit figures would cover the dial labels
+  setNum(val, !run ? "–" : running ? (phase === "latency" ? "0" : fmt(dialValue())) : fmt(run.down)); // a stopped test shows no download, not 0
+  val.classList.toggle("long", (val.getAttribute("data-v") ?? "").length > 3); // multi-gigabit figures would cover the dial labels
   q("#f-unit").textContent = unit();
   q("#f-uu").textContent = unit();
-  q("#f-li").textContent = fms(run?.idleMs);
-  q("#f-lb").textContent = fms(!run ? null : running ? (phase !== "latency" ? run.probeMs : null) : busyOf(run));
-  q("#f-u").textContent = phase === "upload" && running ? fmt(run!.live) : fmt(run?.up);
+  setNum(q("#f-li"), fms(run?.idleMs));
+  setNum(q("#f-lb"), fms(!run ? null : running ? (phase !== "latency" ? run.probeMs : null) : busyOf(run)));
+  setNum(q("#f-u"), fmt(run?.up)); // the dial shows upload while it runs
   const go = q<HTMLButtonElement>("#f-go");
-  go.disabled = running;
-  go.textContent = running ? "Testing…" : A.status === "ready" ? "Start test" : "Test again";
-  const msg = q("#f-msg");
-  msg.hidden = !A.msg;
+  go.textContent = running ? "Stop test" : A.status === "ready" ? "Start test" : "Test again";
+  const msg = q("#f-msg"); // always in the layout, so a message doesn't push the dial up
   msg.textContent = A.msg;
   msg.classList.toggle("warn", A.warn);
 }
@@ -422,10 +499,14 @@ function drawSheet(full: boolean) {
   w.hidden = !A.sheet;
   view.inert = !!A.sheet;
   if (!A.sheet) return;
-  w.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === A.sheet)));
+  w.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => {
+    b.setAttribute("aria-selected", String(b.dataset.tab === A.sheet));
+    b.tabIndex = b.dataset.tab === A.sheet ? 0 : -1;
+  });
   const b = q("#sheet-body");
+  b.setAttribute("aria-labelledby", `tab-${A.sheet}`);
   if (A.sheet === "latency") drawLatency(b, full);
-  else if (A.sheet === "speed") b.innerHTML = timeline();
+  else if (A.sheet === "speed") drawSpeed(b, full);
   else if (full && A.sheet === "setup") b.innerHTML = setupBody();
   else if (full && A.sheet === "history") drawHistory(b);
 }
@@ -434,7 +515,7 @@ function openSheet(tab: Tab, opener?: HTMLElement) {
   if (!A.sheet && opener) A.opener = opener;
   A.sheet = tab;
   drawSheet(true);
-  q(".sheet-x").focus({ preventScroll: true });
+  q(`#tab-${tab}`).focus({ preventScroll: true });
 }
 function closeSheet() {
   A.sheet = null;
@@ -449,7 +530,7 @@ function drawLatency(b: HTMLElement, full: boolean) {
   if (full || !b.querySelector("#lat-side")) {
     b.innerHTML = `<div class="latgrid">
       <div class="lg"><svg viewBox="-6 -6 212 212" role="img" aria-label="Latency gauge. The needle is latency now; the orange marker is the highest latency while the line was busy.">${faceSVG(100, 100, 88)}${gaugeG(CL)}</svg>
-        <span class="lg-read"><span id="lg-v">–</span><small>ms</small></span><span class="lg-busy" id="lg-b"></span></div>
+        <span class="lg-read"><span id="lg-v" class="lg-n none">–</span><small>ms</small></span><span class="lg-busy" id="lg-b"></span></div>
       <div class="latside" id="lat-side"></div></div>`;
   }
   b.querySelector("#lat-side")!.innerHTML = latSide(run);
@@ -458,7 +539,7 @@ function drawLatency(b: HTMLElement, full: boolean) {
   setNeedle(b, CL, lv ?? 0);
   setNeedle(b, CL, ghost ?? 0, "cl-ghost");
   b.querySelector<SVGElement>("#cl-ghost")!.style.opacity = ghost ? "1" : "0";
-  b.querySelector("#lg-v")!.textContent = fms(lv);
+  setNum(b.querySelector("#lg-v")!, fms(lv));
   b.querySelector("#lg-b")!.textContent = running
     ? run?.busyMax
       ? `peak ${fms(run.busyMax)} ms while busy`
@@ -484,38 +565,48 @@ function latSide(run: Run | null): string {
       <dt>Responsiveness</dt><dd>${rpm ? `${rpm.toLocaleString("en-US")} RPM` : "–"}</dd><dt>Server</dt><dd>${esc(location.host)}</dd></dl>`;
 }
 
-function timeline(): string {
+function drawSpeed(b: HTMLElement, full: boolean) {
   const run = A.run;
-  if (!run || (!run.detail.rate.length && !run.detail.idle.length)) return `<div class="pnlx"><p class="note">Run a test to see speed and latency over time.</p></div>`;
-  const W = 600;
-  const H = 150;
-  const d = run.detail;
-  const lat = [...d.idle, ...d.probes.map(([t, ms]) => [t, ms] as const)];
+  if (!run || (!run.detail.rate.length && !run.detail.idle.length)) {
+    b.innerHTML = `<div class="pnlx"><p class="note">Run a test to see speed and latency over time.</p></div>`;
+    return;
+  }
+  if (full || !b.querySelector("#ch")) {
+    b.innerHTML = `<div class="pnlx"><div class="ch-key sr" id="ch-key" role="slider" tabindex="0" aria-label="Moment in the test. Use the arrow keys to read speed and latency at each sample." aria-valuemin="0"></div><div class="ch" id="ch"></div><div class="pnlx" id="ch-info"></div></div>`;
+  }
   let lastT = 0;
-  let maxV = S.planDown;
-  let maxMs = 60;
-  for (const [t, v] of d.rate) [lastT, maxV] = [Math.max(lastT, t), Math.max(maxV, v)];
-  for (const [t, ms] of lat) [lastT, maxMs] = [Math.max(lastT, t), Math.max(maxMs, ms)];
-  const T = run.phase === "done" || A.status !== "running" ? lastT || 1 : Math.max(run.expected, lastT);
-  maxV *= 1.05;
-  maxMs *= 1.15;
-  const x = (t: number) => ((t / T) * W).toFixed(1);
-  const y = (v: number, max: number) => (H - (v / max) * (H - 4)).toFixed(1);
-  const area = (dir: 0 | 1) => {
-    const a = d.rate.filter((p) => p[2] === dir);
-    return a.length < 2 ? "" : `M${x(a[0]![0])} ${H} ` + a.map(([t, v]) => `L${x(t)} ${y(v, maxV)}`).join(" ") + ` L${x(a[a.length - 1]![0])} ${H}Z`;
-  };
-  const line = lat.map(([t, ms], i) => `${i ? "L" : "M"}${x(t)} ${y(ms, maxMs)}`).join(" ");
-  const peak = (dir: 0 | 1) => {
-    const a = d.rate.filter((p) => p[2] === dir);
-    return a.length ? Math.max(...a.map((p) => p[1])) : null;
-  };
-  const fromClient = d.upload_from_client
+  for (const p of run.detail.rate) lastT = Math.max(lastT, p[0]);
+  for (const p of run.detail.probes) lastT = Math.max(lastT, p[0]);
+  const live = run.phase !== "done" && A.status === "running";
+  chart = model({
+    detail: run.detail,
+    T: live ? Math.max(run.expected, lastT) : lastT || 1,
+    floor: S.planDown,
+    down: run.down,
+    up: run.up,
+    idleMs: run.idleMs,
+    conv: (v) => (S.unit === "MBps" ? v / 8 : v),
+    fmt,
+    fms,
+    unit: unit(),
+  });
+  drawChart();
+  const fromClient = run.detail.upload_from_client
     ? `<p class="note">No upload request finished in time, so upload speed is this browser's own count rather than the server's.</p>`
     : "";
-  return `<div class="pnlx"><svg class="tl" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Speed and latency over the test"><path class="tl-d" d="${area(0)}"/><path class="tl-u" d="${area(1)}"/><path class="tl-l" d="${line}"/></svg>
-  <ul class="legend"><li><i style="background:var(--c-down)"></i>Download</li><li><i style="background:var(--c-up)"></i>Upload</li><li><i style="background:var(--c-lat)"></i>Latency</li></ul>
-  <dl class="kv"><dt>Peak download</dt><dd>${fmt(peak(0))} ${unit()}</dd><dt>Peak upload</dt><dd>${fmt(peak(1))} ${unit()}</dd><dt>Connections</dt><dd>${run.streams || "–"}${run.auto && run.streams ? ", auto" : ""}</dd></dl>${fromClient}</div>`;
+  b.querySelector("#ch-info")!.innerHTML = `<p class="note">The shaded start of each transfer is warm-up. It isn't counted in the result, so a result can sit below the peak.</p>
+  <dl class="kv"><dt>Connections</dt><dd>${run.streams || "–"}${run.auto && run.streams ? ", auto" : ""}</dd></dl>${fromClient}`;
+}
+
+let chart: Model | null = null;
+function drawChart() {
+  const el = stage.querySelector("#ch");
+  if (!el || !chart) return;
+  el.innerHTML = draw(chart, A.hover);
+  const key = stage.querySelector("#ch-key")!;
+  key.setAttribute("aria-valuemax", chart.T.toFixed(1));
+  key.setAttribute("aria-valuenow", (A.hover?.t ?? 0).toFixed(1));
+  key.setAttribute("aria-valuetext", A.hover ? describe(chart, A.hover.t) : "No moment chosen");
 }
 
 function setupBody(): string {
@@ -568,7 +659,7 @@ async function drawHistory(b: HTMLElement) {
   }
   const when = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const from = (r: StoredResult) => (r.source === "client" ? r.client || "Browser" : r.source === "schedule" ? "Scheduled" : r.source);
-  b.innerHTML = `<div class="pnlx"><div class="tw"><table class="hist"><thead><tr><th>When</th><th>Down (${unit()})</th><th>Up (${unit()})</th><th>Latency</th><th>Grade</th><th>From</th></tr></thead><tbody>${list
+  b.innerHTML = `<div class="pnlx"><div class="tw" role="region" aria-label="Test history" tabindex="0"><table class="hist"><thead><tr><th>When</th><th>Down (${unit()})</th><th>Up (${unit()})</th><th>Latency</th><th>Grade</th><th>From</th></tr></thead><tbody>${list
     .map(
       (r) =>
         `<tr><td>${esc(when(r.at))}</td><td class="n">${fmt(r.download_mbps)}</td><td class="n">${fmt(r.upload_mbps)}</td><td class="n">${fms(r.idle_ms)} ms</td><td>${esc(r.grade || "–")}</td><td>${esc(from(r))}</td></tr>`,
@@ -616,8 +707,62 @@ stage.addEventListener("change", (e) => {
   update();
 });
 
+// Speed over time crosshair: follows the pointer, or the arrow keys when the chart has focus.
+stage.addEventListener("pointermove", (e) => {
+  const p = (e.target as Element).closest<HTMLElement>("[data-plot]");
+  if (!chart || !p) return;
+  const r = p.getBoundingClientRect();
+  const t = snap(chart, ((e.clientX - r.left) / r.width) * chart.T);
+  A.hover = t == null ? null : { t, plot: p.dataset.plot as Hover["plot"] };
+  drawChart();
+});
+stage.addEventListener("pointerout", (e) => {
+  const to = e.relatedTarget as Element | null;
+  if (A.hover && !to?.closest("[data-plot]")) {
+    A.hover = null;
+    drawChart();
+  }
+});
+const STEPS: Record<string, 1 | -1 | "first" | "last"> = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, Home: "first", End: "last" };
+stage.addEventListener("keydown", (e) => {
+  const target = e.target as HTMLElement;
+  const by = STEPS[e.key];
+  if (by == null) return;
+  if (target.id === "ch-key" && chart) {
+    e.preventDefault();
+    const t = by === "first" || by === "last" ? step(chart, null, by === "first" ? 1 : -1) : step(chart, A.hover?.t ?? null, by);
+    A.hover = t == null ? null : { t, plot: "tp" };
+    drawChart();
+  } else if (target.dataset.tab && (e.key === "ArrowLeft" || e.key === "ArrowRight" || by === "first" || by === "last")) {
+    // Tabs: arrows move between tabs and open them (WAI-ARIA tabs, automatic activation).
+    e.preventDefault();
+    const keys = TABS.map(([k]) => k);
+    const i = keys.indexOf(target.dataset.tab as Tab);
+    const n = by === "first" ? 0 : by === "last" ? keys.length - 1 : (i + (by as number) + keys.length) % keys.length;
+    openSheet(keys[n]!);
+  }
+});
+stage.addEventListener("focusin", (e) => {
+  if ((e.target as Element).id === "ch-key" && chart && !A.hover) {
+    const t = step(chart, null, 1);
+    A.hover = t == null ? null : { t, plot: "tp" };
+    drawChart();
+  }
+});
+stage.addEventListener("focusout", (e) => {
+  if ((e.target as Element).id === "ch-key" && A.hover) {
+    A.hover = null;
+    drawChart();
+  }
+});
+
 addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && A.sheet) closeSheet();
+  if (e.key !== "Escape") return;
+  if (A.hover) {
+    // Escape dismisses the chart tooltip first, without moving the pointer (WCAG 1.4.13).
+    A.hover = null;
+    drawChart();
+  } else if (A.sheet) closeSheet();
 });
 
 update();

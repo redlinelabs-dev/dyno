@@ -18,21 +18,22 @@
 body { margin: 0; background: #0F1115; color: var(--bone); font-family: var(--f-ui) }
 :focus-visible { outline: 2px solid var(--orange); outline-offset: 2px }
 button { -webkit-tap-highlight-color: transparent; font-family: inherit }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
+#live { top: 0; left: 0 } /* after the full-height view; left in flow it made the page 1px too tall */
 [hidden] { display: none !important }
 
 .stage { container: stage / inline-size; position: relative; min-height: 100dvh }
 
 /* ---------- view frame (committed dark: the dash at night) ---------- */
-.v { min-height: 100dvh; color: var(--bone); font-family: var(--f-ui);
-  display: grid; justify-items: center; align-content: start; gap: 20px;
-  padding: max(20px, env(safe-area-inset-top, 0px)) max(16px, 3cqi, env(safe-area-inset-right, 0px)) 40px max(16px, 3cqi, env(safe-area-inset-left, 0px)) }
+.v { height: 100dvh; color: var(--bone); font-family: var(--f-ui);
+  display: grid; grid-template: auto minmax(0, 1fr) / minmax(0, 1fr); justify-items: center; gap: 12px;
+  padding: max(20px, env(safe-area-inset-top, 0px)) max(16px, 3cqi, env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) max(16px, 3cqi, env(safe-area-inset-left, 0px)) }
 .v-top { width: 100%; max-width: 1240px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; color: var(--mute) }
-.v-logo { display: flex; align-items: baseline; gap: 10px }
+.v-logo { display: flex; align-items: baseline; gap: 10px; margin: 0; font: inherit }
 .v-brand { font-family: var(--f-num); font-weight: 900; font-size: 24px; color: var(--bone); letter-spacing: .02em; font-style: italic; transform: skewX(-6deg) }
 .v-brand b { color: var(--red) }
 .v-by { font-size: 12px; color: var(--mute); letter-spacing: .02em }
-.v-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
+.v-host { min-width: 0; text-align: right; overflow-wrap: anywhere }
 .g-tick { stroke: var(--bone) } .g-tick.minor { stroke: var(--mute) }
 .g-lab { fill: var(--bone); font-family: var(--f-num); font-weight: 800; text-anchor: middle; dominant-baseline: middle }
 .g-red { fill: none; stroke: var(--red) }
@@ -40,7 +41,7 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 .g-hub { fill: var(--black); stroke: var(--orange) }
 .g-needle, .g-ghost { transform-box: view-box; transition: transform .16s linear }
 .g-ghost line { stroke: var(--orange); opacity: .55 }
-.tele-link { font: inherit; font-size: 14px; font-weight: 500; color: var(--mute); background: none; border: 0; padding: 8px 6px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px }
+.tele-link { font: inherit; font-size: max(13px, calc(14 * var(--p))); font-weight: 500; color: var(--mute); background: none; border: 0; padding: 8px 6px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px }
 .tele-link:hover { color: var(--bone) }
 
 /* ---------- form bits (setup + history inside telemetry) ---------- */
@@ -54,7 +55,7 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 .seg label { position: relative; cursor: pointer; font-size: 14px }
 .seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
 .seg span { display: block; padding: 7px 13px }
-.seg input:checked + span { background: var(--red); color: var(--bone) }
+.seg input:checked + span { background: var(--deep); color: var(--bone) }
 .seg input:focus-visible + span { outline: 2px solid var(--orange); outline-offset: -3px }
 .exp { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center }
 .sbtn { font: inherit; font-size: 14px; background: none; color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 7px 12px; cursor: pointer }
@@ -66,12 +67,51 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 .hist th { text-align: left; font-weight: 500; color: var(--s-mute); font-size: 12.5px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--s-line) }
 .hist td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--s-line); white-space: nowrap }
 .hist td.n { font-family: var(--f-num); font-weight: 700; font-size: 16px }
-.tl { display: block; width: 100%; height: 150px }
-.tl-d { fill: var(--c-down); fill-opacity: .3; stroke: var(--c-down); stroke-width: 1.5; vector-effect: non-scaling-stroke }
-.tl-u { fill: var(--c-up); fill-opacity: .25; stroke: var(--c-up); stroke-width: 1.5; vector-effect: non-scaling-stroke }
-.tl-l { fill: none; stroke: var(--c-lat); stroke-width: 1.5; vector-effect: non-scaling-stroke }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--s-mute); margin: 0; padding: 0; list-style: none }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px }
+/* ---------- Speed over time: two panels on one time scale ---------- */
+.ch { display: grid; gap: 30px; border-radius: 4px; outline-offset: 8px }
+.ch-panel { display: grid; min-width: 0 }
+.ch-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px }
+.ch-head h2 { margin: 0; font-size: 14px; font-weight: 600 }
+.ch-key:focus-visible + .ch { outline: 2px solid var(--orange) }
+.ch-head span { font-size: 12.5px; color: var(--s-mute) }
+.ch-plot { position: relative; height: 190px; margin-left: 40px; touch-action: pan-y; cursor: crosshair }
+.ch-plot[data-plot="lp"] { height: 110px }
+.ch-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible }
+.ch-g { stroke: #22252C; stroke-width: 1; vector-effect: non-scaling-stroke; shape-rendering: crispEdges }
+.ch-g.ch-base { stroke: #3A3E47 }
+.ch-warm { fill: var(--bone); fill-opacity: .035 }
+.ch-bound { stroke: #3A3E47; stroke-width: 1; vector-effect: non-scaling-stroke; shape-rendering: crispEdges }
+.ch-l { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke }
+.ch-a { stroke: none }
+.ch-l.down, .ch-ref.down { stroke: var(--c-down) } .ch-a.down { fill: url(#ch-gd) } .ch-gd stop { stop-color: var(--c-down) }
+.ch-l.up, .ch-ref.up { stroke: var(--c-up) } .ch-a.up { fill: url(#ch-gu) } .ch-gu stop { stop-color: var(--c-up) }
+.ch-l.lat, .ch-ref.lat { stroke: var(--c-lat) } .ch-a.lat { fill: url(#ch-gl) } .ch-gl stop { stop-color: var(--c-lat) }
+.ch stop:first-child { stop-opacity: .26 } .ch stop:last-child { stop-opacity: .02 }
+.ch .ch-gu stop:first-child { stop-opacity: .16 }
+.ch-ref { stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke }
+.ch-y { position: absolute; right: calc(100% + 8px); transform: translateY(50%); font-size: 11.5px; line-height: 1; color: var(--s-mute); font-variant-numeric: tabular-nums; white-space: nowrap }
+.ch-xa { position: relative; height: 20px; margin-left: 40px; font-size: 11.5px; color: var(--s-mute); font-variant-numeric: tabular-nums }
+.ch-xt { position: absolute; top: 6px; transform: translateX(-50%); white-space: nowrap }
+.ch-xt.first { transform: none } .ch-xt.last { transform: translateX(-100%) }
+.ch-ph, .ch-rl { position: absolute; white-space: nowrap; pointer-events: none; text-shadow: 0 0 4px var(--s-panel), 0 0 2px var(--s-panel) }
+.ch-ph { top: 6px; margin-left: 8px; font-size: 12px; font-weight: 600; color: var(--bone) }
+.ch-rl { margin: 0 0 4px 8px; font-size: 11.5px; color: var(--bone); font-variant-numeric: tabular-nums }
+.ch-rl.end { margin: 0 0 4px -8px; transform: translateX(-100%) }
+.ch-cross { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -.5px; background: var(--bone); opacity: .5; pointer-events: none }
+.ch-tip { position: absolute; top: 8px; z-index: 2; margin-left: 12px; padding: 8px 11px; background: #0F1115; border: 1px solid var(--s-line); border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .45); font-size: 12.5px; white-space: nowrap; pointer-events: none }
+.ch-tip.left { transform: translateX(calc(-100% - 24px)) }
+.ch-tip p { margin: 0 0 5px; color: var(--s-mute) }
+.ch-tip ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; color: var(--s-mute) }
+.ch-tip b { font-family: var(--f-num); font-size: 17px; font-weight: 700; color: var(--bone); font-variant-numeric: tabular-nums }
+.ch-k { display: inline-block; width: 14px; height: 2px; border-radius: 1px; margin-right: 8px; vertical-align: middle }
+.ch-k.down { background: var(--c-down) } .ch-k.up { background: var(--c-up) } .ch-k.lat { background: var(--c-lat) }
+.ch-lg { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 13px }
+.ch-lg th, .ch-lg td { padding: 6px 0 6px 16px; text-align: right; border-bottom: 1px solid var(--s-line) }
+.ch-lg thead th { padding-top: 0; font-size: 12px; font-weight: 500; color: var(--s-mute) }
+.ch-lg tbody th { font-weight: 500 }
+.ch-lg.named tr > :first-child { width: 100%; padding-left: 0; text-align: left }
+.ch-lg td { font-family: var(--f-num); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums }
 .gradebox { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center }
 .grade { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 14px; background: var(--red); color: var(--bone); font-family: var(--f-num); font-weight: 900; font-size: 50px; line-height: 1 }
 .gradebox p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--s-mute) }
@@ -98,41 +138,82 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
   .sheet, .sheet-wrap { grid-template-columns: minmax(0, 1fr) }
 }
 @container stage (max-width: 480px) { .tabs button { padding: 7px 10px } .tabs .long { display: none } .tabs .short { display: inline } }
+/* Wide screens: a centred dialog rather than a sheet off the bottom edge (ADR-0013). */
+@media (min-width: 700px) and (min-height: 560px) {
+  .sheet-wrap { align-items: center; padding: 24px }
+  .sheet-back { background: rgb(5 6 8 / .74) }
+  .sheet { width: min(100%, 920px); max-height: calc(100dvh - 48px); border-bottom: 1px solid var(--line); border-radius: 16px; padding: 22px 30px 30px;
+    box-shadow: 0 30px 80px rgb(0 0 0 / .55); animation-name: modal-in; animation-duration: .16s }
+  .sheet-grab { display: none }
+}
+@keyframes modal-in { from { opacity: 0; scale: .98 } }
 
 /* ---------- fast lane ---------- */
-.f-dial { position: relative; width: min(100%, 540px); margin-top: 2cqi }
+/* Dial, readouts and actions are one composition, drawn at 540 design px wide
+   and scaled as a whole to the largest size that fits the space under the
+   header (ADR-0016): full height on wide screens, full width on phones. --p is
+   one design px, set by fit() in main.ts. */
+.v-main { width: 100%; min-height: 0; display: grid; place-items: center }
+.fit { --p: 1px; width: calc(540 * var(--p)); display: grid; justify-items: center }
+.fit.row { width: auto; grid-template: 1fr auto auto auto 1fr / calc(540 * var(--p)) auto; column-gap: calc(48 * var(--p)) }
+.fit.row .f-dial { grid-area: 1 / 1 / -1 / 2; align-self: center }
+.fit.row .read { grid-area: 2 / 2; margin-top: 0 }
+.fit.row .f-act { grid-area: 3 / 2 }
+.fit.row .f-msg { grid-area: 4 / 2 }
+.f-dial { position: relative; width: 100% }
 .f-dial svg { display: block; width: 100%; height: auto; overflow: visible }
 .f-track { fill: none; stroke: #20232A; stroke-width: 16; stroke-linecap: round }
 .f-fill { fill: none; stroke: var(--bone); stroke-width: 16; stroke-linecap: round }
 .f-over { fill: none; stroke: var(--red); stroke-width: 16 }
 .f-zone { fill: none; stroke: var(--red); stroke-width: 3 }
 .f-tip { fill: var(--orange); stroke: #0F1115; stroke-width: 5 }
+.f-dial.up .f-fill { stroke: var(--c-up) }
+.f-mark { stroke: var(--red); stroke-width: 5; stroke-linecap: round; opacity: 0; transition: opacity .2s }
+.f-mark.on { opacity: 1 }
 .f-lab { fill: var(--mute); font-family: var(--f-num); font-weight: 700; font-size: 17px; text-anchor: middle; dominant-baseline: middle }
 .f-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; padding-top: 6% }
-.f-phase { font-size: 14px; color: var(--mute); display: flex; align-items: center; gap: 7px }
-.f-phase i { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); opacity: 0 }
+.f-phase { font-size: max(12px, calc(14 * var(--p))); color: var(--mute); display: flex; align-items: center; gap: .5em }
+.f-phase i { width: .5em; height: .5em; border-radius: 50%; background: var(--orange); opacity: 0 }
 .running .f-phase i { opacity: 1; animation: blink 1s ease-in-out infinite }
 @keyframes blink { 50% { opacity: .2 } }
-.f-val { font-family: var(--f-num); font-weight: 900; font-size: clamp(88px, 25cqi, 168px); line-height: .88; font-variant-numeric: tabular-nums; letter-spacing: -.01em }
-.f-val.long { font-size: clamp(64px, 17cqi, 116px) }
-.f-unit { font-size: 16px; color: var(--mute) }
-.f-sub { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: -2cqi }
-.chip { display: grid; grid-auto-flow: column; align-items: baseline; gap: 6px; font-size: 13.5px; color: var(--mute); background: #15171C; border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; cursor: pointer }
-.chip b { font-family: var(--f-num); font-weight: 800; font-size: 22px; color: var(--bone); font-variant-numeric: tabular-nums }
-.chip:hover { border-color: #4A4F59 }
-.chip .sep { width: 1px; height: 14px; background: var(--line); align-self: center }
-.f-act { display: flex; gap: 14px; align-items: center }
-.go { font-size: 15px; font-weight: 600; color: var(--carbon); background: var(--bone); border: 0; border-radius: 999px; padding: 11px 22px; cursor: pointer }
-.go:disabled { opacity: .35; cursor: default }
-.f-msg { margin: 0; max-width: 46ch; text-align: center; font-size: 13.5px; line-height: 1.45; color: var(--mute) }
+.f-val { font-family: var(--f-num); font-weight: 900; font-size: calc(168 * var(--p)); line-height: .88; font-variant-numeric: tabular-nums; letter-spacing: -.01em }
+.f-val { --tn: .52em }
+.f-val.long { font-size: calc(116 * var(--p)) }
+.f-unit { font-family: var(--f-num); font-weight: 800; font-size: calc(34 * var(--p)); line-height: 1; letter-spacing: .02em; margin-top: calc(6 * var(--p)) }
+/* Big Shoulders has no tabular figures ("1" is half the width of "8"), so
+   setNum() boxes each digit at the widest digit's width for the weight. */
+.tn { display: inline-block; width: var(--tn, .48em); text-align: center }
+.f-val.none, .rn b.none, .lg-n.none { color: #62666F } /* dim, but 3:1 for large text */
+
+/* Readouts under the dial: big numerals, small units. Each figure is right-aligned
+   in a slot sized for "999" ms or "9,999" Mbps, so it grows leftward like an
+   odometer and nothing beside it moves; its label is right-aligned to match.
+   Each group's rule is its colour in the Speed over time chart. */
+.read { display: grid; grid-template-columns: max-content max-content; justify-content: center; column-gap: calc(56 * var(--p)); margin-top: calc(-4 * var(--p)) }
+.rg { --rule: var(--c-lat); font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: left; cursor: pointer;
+  display: grid; grid-template-columns: max-content max-content; gap: 0 calc(36 * var(--p)); align-content: start }
+.rg.up { --rule: var(--c-up); grid-template-columns: max-content }
+.rg-h { grid-column: 1 / -1; font-size: max(14px, calc(16 * var(--p))); font-weight: 600; color: var(--bone); padding-bottom: .5em; margin-bottom: .62em;
+  border-bottom: 2px solid var(--rule); transition: color .15s }
+.rg:hover .rg-h, .rg:focus-visible .rg-h { color: var(--rule) }
+.rv { display: grid; grid-template-columns: max-content max-content; align-items: baseline; column-gap: calc(5 * var(--p)); row-gap: 2px }
+.rl { grid-column: 1; text-align: right; font-size: max(12px, calc(14 * var(--p))); line-height: 1.4; min-height: 1.4em; color: var(--mute) }
+.rn { display: contents }
+.rn b { grid-row: 2; grid-column: 1; --tn: .52em; font-family: var(--f-num); font-weight: 900; font-size: calc(64 * var(--p)); line-height: .9; color: var(--bone); min-width: 1.6em; text-align: right }
+.rn b.wide { min-width: 2.38em }
+.rn small { grid-row: 2; grid-column: 2; font-size: max(12px, calc(15 * var(--p))); font-weight: 500; color: var(--mute) }
+.f-act { display: flex; gap: calc(14 * var(--p)); align-items: center; margin-top: calc(20 * var(--p)) }
+.go { font-size: max(14px, calc(15 * var(--p))); font-weight: 600; color: var(--carbon); background: var(--bone); border: 0; border-radius: 999px; padding: .73em 1.47em; cursor: pointer; min-width: 8.5em }
+.f-msg { margin: calc(12 * var(--p)) 0 0; max-width: 46ch; min-height: 2.9em; text-align: center; font-size: max(12.5px, calc(13.5 * var(--p))); line-height: 1.45; color: var(--mute) }
 .f-msg.warn { color: var(--orange) }
 
 /* ---------- latency tab: Cluster's gauge ---------- */
 .lg { --face: #0F1115; display: grid; justify-items: center; gap: 2px; align-content: start }
 .lg svg { display: block; width: min(100%, 300px); height: auto; overflow: visible }
 .lg-read { font-family: var(--f-num); font-weight: 800; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; margin-top: 6px }
+.lg-n { display: inline-block; min-width: 1.5em; text-align: center }
 .lg-read small { font-family: var(--f-ui); font-size: 13px; font-weight: 500; color: var(--s-mute); margin-left: 4px }
 .lg-busy { font-size: 13px; color: var(--orange); min-height: 1.4em }
 .latside { display: grid; gap: 22px; align-content: start }
 
-@media (prefers-reduced-motion: reduce) { .g-needle, .g-ghost { transition: none } .sheet { animation: none } .running .f-phase i { animation: none } }
+@media (prefers-reduced-motion: reduce) { .g-needle, .g-ghost { transition: none } .sheet { animation: none } .running .f-phase i { animation: none } .f-mark { transition: none } }

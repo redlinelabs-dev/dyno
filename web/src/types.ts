@@ -48,12 +48,16 @@ export interface Detail {
   idle: [t: number, ms: number][];
   rate: [t: number, mbps: number, dir: 0 | 1][]; // dir 0 = download, 1 = upload
   probes: [t: number, ms: number, dir: 0 | 1][];
+  spans?: Span[]; // one per direction, for phase marks and the warm-up shading
   upload_from_client?: boolean; // no upload request completed, so the client's count was used
   timer_lag_ms?: number;
 }
 
+/** A transfer's planned timing: when it starts, when the counted part starts (after warm-up), when it ends. */
+export type Span = [dir: 0 | 1, start: number, counted: number, end: number];
+
 export type WorkerMsg =
-  | { type: "phase"; phase: Phase; t: number }
+  | { type: "phase"; phase: Phase; t: number; span?: Span }
   | { type: "idle"; t: number; ms: number; median: number; jitter: number }
   | { type: "rate"; dir: Direction; t: number; mbps: number }
   | { type: "probe"; dir: Direction; t: number; ms: number }

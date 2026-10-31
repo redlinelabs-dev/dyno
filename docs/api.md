@@ -95,7 +95,9 @@ Stores a finished test. Body, at most 256 KiB:
 Speeds are Mbit/s and latencies milliseconds, finite and between 0 and 10⁶.
 `client` is a short label, cut to 80 bytes. `detail` is any JSON value; the
 web UI sends its time series there (seconds from test start, `dir` 0 for
-download and 1 for upload) and the server stores it as is. Bad input is
+download and 1 for upload), plus `spans`: each transfer's
+`[dir, start, counted, end]`, where `counted` is when warm-up ends. The
+server stores it as is. Bad input is
 `400` with `{"error": "..."}`.
 
 The reply is `201` with `Location: /api/v1/results/<id>` and the stored

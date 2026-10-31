@@ -52,6 +52,8 @@ ADR-0007.
 - **Progressive disclosure is the product.** The first screen holds one action,
   one number, and latency. A new feature goes behind the telemetry layer
   unless the owner says otherwise.
+- **Accessibility is WCAG 2.2 AA** (ADR-0015): keyboard paths, screen-reader
+  text for anything drawn, 4.5:1 text contrast. Re-check after UI changes.
 - **No Ookla code, CLI or servers.** Their EULA bans the multi-device and
   commercial use dyno exists for.
 - **Paid features stay separable.** Keep anything that could become paid in

@@ -5,7 +5,7 @@
 // aborts a test by terminating this worker.
 
 import { Buckets, jitter, median, quantile, uploadRate, type UploadReq } from "./stats";
-import type { Detail, Direction, Plan, StartMsg, Summary, Transfer, WorkerMsg } from "./types";
+import type { Detail, Direction, Plan, Span, StartMsg, Summary, Transfer, WorkerMsg } from "./types";
 
 const BUCKET = 0.1; // seconds per byte-count bucket
 const LIVE_WINDOW = 0.5; // seconds averaged for the live gauge
@@ -79,7 +79,10 @@ async function transfer(
   const duration = (spec.duration_ms * scale) / 1000;
   const warmup = Math.min(spec.warmup_ms / 1000, duration * 0.4);
   const d = dir === "download" ? 0 : 1;
-  send({ type: "phase", phase: dir, t: now() });
+  const t = round(now());
+  const span: Span = [d, t, round(t + warmup), round(t + duration)];
+  detail.spans = [...(detail.spans ?? []), span];
+  send({ type: "phase", phase: dir, t: now(), span });
 
   const start = now();
   const at = () => now() - start;
