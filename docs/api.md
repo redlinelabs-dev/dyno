@@ -18,8 +18,11 @@ arrives in a later milestone and will be added here.
    `max_bytes`. Drop samples from the first `warmup_ms`.
 4. While a direction runs, ping every `latency.loaded_interval_ms` on a
    separate connection, never on a load stream.
-5. Upload speed comes from the server's `bytes` and `elapsed_us`, not from
-   client progress events (ADR-0003).
+5. Upload speed comes from the server's `bytes`, not from client progress
+   events (ADR-0003). Divide each stream's bytes by its wall time, from opening
+   its first request to the last reply, and add the streams. Don't divide by
+   `elapsed_us`: it leaves out the gaps between requests and the body bytes
+   that arrive before the headers are read, so it reads high.
 6. Tag every `/dl` and `/ul` request with `?t=<test_id>` from the plan, then
    `POST` the result to `endpoints.results` with the same `test_id`. The
    server stores its own byte counts and the grade with it.
@@ -68,7 +71,8 @@ Send any body up to 16 GiB. The server discards it and replies:
 ```
 
 `elapsed_us` runs from the server receiving the request headers to it reading
-the last body byte. The same figure is in `Server-Timing: recv;dur=<ms>`.
+the last body byte, so it is a per-request figure rather than a stream's rate
+(see step 5). The same figure is in `Server-Timing: recv;dur=<ms>`.
 `?t=<test_id>` adds the bytes received to that test's count. A
 body over 16 GiB gets `413`. A body that stops arriving for 10 s gets `408`
 and the connection is closed.

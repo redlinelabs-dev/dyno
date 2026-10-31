@@ -46,19 +46,22 @@ export class Buckets {
   }
 }
 
-/** One finished upload request as the server saw it. */
+/** One finished upload request: the server's byte count, timed on the client clock. */
 export interface UploadReq {
-  start: number; // seconds since the phase began, client clock
+  start: number; // seconds since the phase began, when the request was opened
+  end: number; // when the server's reply arrived, so every byte had been received
   bytes: number; // bytes the server received
-  elapsedUs: number; // server time from headers to last body byte
 }
 
 /**
- * Upload speed from the server's counts (ADR-0003). Each stream sends requests
- * back to back, so its rate is the bytes it delivered over the server time
- * those requests took, counting only requests that started after warmup.
- * Streams run in parallel, so their rates add. Returns null when no stream
- * finished a request at all.
+ * Upload speed from the server's counts (ADR-0003). Each stream's rate is the
+ * bytes the server received over the stream's wall time, from opening its
+ * first request after warmup to the reply to its last. Streams run in
+ * parallel, so their rates add. Wall time keeps the gaps between a stream's
+ * requests; the server's own per-request time leaves them out, and starts
+ * only once the body is already arriving, so it reads high. A stream with no
+ * request after warmup falls back to its warmup requests. Returns null when no
+ * stream finished a request at all.
  */
 export function uploadRate(streams: UploadReq[][], warmup: number): number | null {
   let total = 0;
@@ -66,8 +69,9 @@ export function uploadRate(streams: UploadReq[][], warmup: number): number | nul
   for (const reqs of streams) {
     const steady = reqs.filter((r) => r.start >= warmup);
     const use = steady.length ? steady : reqs;
+    if (!use.length) continue;
     const bytes = use.reduce((s, r) => s + r.bytes, 0);
-    const secs = use.reduce((s, r) => s + r.elapsedUs, 0) / 1e6;
+    const secs = Math.max(...use.map((r) => r.end)) - Math.min(...use.map((r) => r.start));
     if (secs > 0) {
       total += mbps(bytes, secs);
       any = true;

@@ -23,15 +23,22 @@ test("bucket rate counts whole buckets in the window", () => {
   expect(b.rate(2.95, 3)).toBe(0); // no whole bucket inside
 });
 
-test("upload rate sums per-stream server rates after warmup", () => {
-  const s = (start: number, mb: number, secs: number) => ({ start, bytes: mb * 125_000, elapsedUs: secs * 1e6 });
+test("upload rate is each stream's bytes over its own wall time after warmup, summed", () => {
+  const s = (start: number, end: number, mb: number) => ({ start, end, bytes: mb * 125_000 });
   // Two streams at 100 and 200 Mbit/s after warmup; warmup requests are slower and ignored.
-  const rate = uploadRate([[s(0, 10, 1), s(3, 100, 1), s(4, 100, 1)], [s(0, 10, 1), s(3.5, 400, 2)]], 3);
+  const rate = uploadRate([[s(0, 1, 10), s(3, 4, 100), s(4, 5, 100)], [s(0, 1, 10), s(3.5, 5.5, 400)]], 3);
   expect(rate).toBeCloseTo(300);
 });
 
+test("upload rate counts the gaps between requests", () => {
+  // Each request sends 75 Mbit in 0.75 s and the next starts 0.25 s later, so the
+  // stream delivers 300 Mbit in 3.75 s (80 Mbit/s), not the 100 it reaches while a request is open.
+  const reqs = [0, 1, 2, 3].map((i) => ({ start: 3 + i, end: 3.75 + i, bytes: 75 * 125_000 }));
+  expect(uploadRate([reqs], 3)).toBeCloseTo(80);
+});
+
 test("upload rate falls back to warmup requests, then to null", () => {
-  expect(uploadRate([[{ start: 0, bytes: 125_000, elapsedUs: 1e6 }]], 3)).toBeCloseTo(1);
+  expect(uploadRate([[{ start: 0, end: 1, bytes: 125_000 }]], 3)).toBeCloseTo(1);
   expect(uploadRate([[], []], 3)).toBeNull();
 });
 

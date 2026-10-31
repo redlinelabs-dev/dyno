@@ -184,7 +184,7 @@ async function uploadStream(
   while (!signal.aborted) {
     const start = at();
     const began = performance.now();
-    const reply = await new Promise<{ bytes: number; elapsed_us: number } | null>((resolve, reject) => {
+    const reply = await new Promise<{ bytes: number } | null>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       let sent = 0;
       const abort = () => xhr.abort();
@@ -205,7 +205,7 @@ async function uploadStream(
       xhr.send(bodyOf(size, spec.max_bytes));
     });
     if (!reply) return;
-    done.push({ start, bytes: reply.bytes, elapsedUs: reply.elapsed_us });
+    done.push({ start, end: at(), bytes: reply.bytes });
     if (performance.now() - began < spec.target_request_ms) size = Math.min(size * 2, spec.max_bytes);
   }
 }

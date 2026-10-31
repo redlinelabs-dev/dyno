@@ -18,11 +18,16 @@ the next session would otherwise re-argue these.
   live gauge shows the last 0.5 s.
 - **Upload** is sent with XHR and a `Blob` body, sliced from one random 1 MiB
   block repeated up to the plan's 32 MiB cap. Progress events only drive the
-  gauge. The result comes from the server's replies: each stream's bytes over
-  the server's `elapsed_us`, for requests that started after warmup, summed
-  over streams. A stream with no finished request after warmup falls back to
-  its warmup requests. If no request finished at all, the browser's count is
-  used and the result's detail says `upload_from_client`.
+  gauge. The result comes from the server's replies: each stream's bytes,
+  for requests that started after warmup, over the stream's wall time from
+  opening the first of them to the reply to the last, summed over streams.
+  Amended 2026-10-31: the first version divided by the server's `elapsed_us`,
+  which skips the gaps between requests and the bytes buffered before the
+  headers are read. On a gigabit link it reported 1,234 Mbps from 1.69 GB in
+  15 s, above both the line rate and the chart's peak. A stream with no
+  finished request after warmup falls back to its warmup requests. If no
+  request finished at all, the browser's count is used and the result's
+  detail says `upload_from_client`.
 - **Latency probes** use Resource Timing's `responseStart − requestStart`,
   which leaves out the worker's own scheduling delay. They fall back to wall
   time when the browser zeroes those fields. Loaded probes run every
