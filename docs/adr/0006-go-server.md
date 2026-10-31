@@ -51,8 +51,44 @@ measured, and the footprint check fails the build when one is exceeded.
   is file-backed pages of the larger binary (6.95 → 11.34 MiB), which the
   kernel can reclaim. Don't raise this again; cut instead.
 - Peak RSS ≤ 48 MiB at 32 concurrent streams.
-- Soak slope ≤ +16 KiB/min over 10 minutes after a 2-minute warmup.
+- No leak over a 12-minute soak of mixed traffic (tests, pings, result posts
+  and history reads). After a 2-minute warmup, the per-minute floor of Go's
+  live heap and the per-minute floor of memory outside Go each grow by
+  ≤ +16 KiB/min, and RSS stays ≤ 48 MiB throughout. Amended 2026-10-31; see
+  below.
 - Stalled connections are closed by timeout.
+
+### Leak budget, not an RSS slope (amended 2026-10-31)
+
+The budget was "soak RSS slope ≤ +16 KiB/min". Every full run since M2 failed
+it (192, 110 and 161 KiB/min) and so did M1 when rerun (24), while RSS ended
+near 29 MiB each time. The owner: "A single step-up is not a leak. A leak is
+something that increases memory usage unconstrained. If an increase is
+constrained then that's by definition not a leak".
+
+The diagnosis agrees. With every sample kept and the runtime's own counters
+logged, the memory Go had mapped stayed at 25,530 KiB from the first minute to
+the twelfth. RSS moved only when the runtime handed heap pages back to the
+kernel and took them again, in 384 KiB steps, and once a run is past warmup
+one such step inside the window is enough to read as 100+ KiB/min. The same
+soak at a third of the traffic measured +3. An RSS slope over 10 minutes
+measures when the allocator happens to reuse pages, not whether memory grows.
+
+So the check now measures growth directly. `/metrics` exports Go's live heap,
+the memory it has mapped and the part it has released; the footprint check
+scrapes them every 2 s alongside `RssAnon`. Live heap that keeps rising is a
+Go leak; `RssAnon` minus Go's resident memory that keeps rising is a leak in
+SQLite or anything else outside Go. Floors per minute ignore the GC sawtooth,
+and the RSS ceiling still catches a large one-off jump. The RSS slope stays in
+the table as information.
+
+The first run of the new check passed the live heap (+5.7 KiB/min) and failed
+memory outside Go (+33). That memory is SQLite's, allocated by modernc's own
+allocator. Diffing `/proc/pid/smaps` across rounds of 2,000 stored results
+showed it filling to about 4.5 MiB within the first ~6,000 results, then
+growing by 4 to 8 KiB per 2,000. The soak stores 360 results, so it measured
+only the fill. The footprint check now stores 8,000 results before the soak
+starts and measures the filled state a server reaches in its first weeks.
 
 ## Consequences
 

@@ -9,8 +9,8 @@
 //                                     12-minute soak, CPU and ping at 1 Gbit/s,
 //                                     and a row in bench/results/dyno-footprint.jsonl
 //
-// The soak slope budget is defined over a 10-minute soak, so the quick mode
-// skips it rather than guess from a short run.
+// The leak budget is defined over a 10-minute soak, so the quick mode skips
+// it rather than guess from a short run.
 
 import { $ } from "bun";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -31,7 +31,7 @@ const METRICS_ADDR = `127.0.0.1:${PORT + 1}`;
 const BUDGET = {
   idleRssMiB: 24,
   peakRssMiB: 48,
-  soakSlopeKiBPerMin: 16,
+  leakKiBPerMin: 16, // the soak's live-heap and outside-Go slopes
 };
 
 // Pin server and clients apart, as bench/ does, when there are cores to spare.
@@ -108,6 +108,58 @@ function scrape(everyMs: number) {
     return n;
   };
 }
+
+// memSampler scrapes /metrics every everyMs and reads the server's RssAnon in
+// the same moment, until the returned stop is awaited. It returns each
+// minute's lowest live heap and lowest anonymous memory outside Go (RssAnon
+// minus Go's mapped memory not yet returned to the OS), from minute 2 on, and
+// the least-squares slope through each set of floors.
+function memSampler(pid: number, everyMs: number) {
+  let done = false;
+  const n = { ok: 0, failed: 0 };
+  const pts: { t: number; live: number; outside: number }[] = [];
+  const t0 = performance.now();
+  const gauge = (text: string, name: string) => Number(text.match(new RegExp(`^${name} (\\S+)$`, "m"))?.[1] ?? NaN);
+  const loop = (async () => {
+    while (!done) {
+      try {
+        const r = await fetch(`http://${METRICS_ADDR}/metrics`);
+        const text = await r.text();
+        const anonKiB = Number(readFileSync(`/proc/${pid}/status`, "utf8").match(/^RssAnon:\s+(\d+)/m)?.[1] ?? NaN);
+        const live = gauge(text, "go_gc_heap_live_bytes");
+        const goResident = gauge(text, "go_memory_classes_total_bytes") - gauge(text, "go_memory_classes_heap_released_bytes");
+        if (!r.ok || [anonKiB, live, goResident].some(Number.isNaN)) throw new Error("bad scrape");
+        n.ok++;
+        pts.push({ t: (performance.now() - t0) / 1000, live: live / 1024, outside: anonKiB - goResident / 1024 });
+      } catch {
+        n.failed++;
+      }
+      await sleep(everyMs);
+    }
+  })();
+  const floors = (key: "live" | "outside") => {
+    const byMin = new Map<number, number[]>();
+    for (const p of pts) {
+      const m = Math.floor(p.t / 60);
+      if (m >= 2) byMin.set(m, [...(byMin.get(m) ?? []), p[key]]);
+    }
+    const full = (60_000 / everyMs) / 2; // a minute counts once half its samples are in
+    return [...byMin].filter(([, v]) => v.length >= full).map(([m, v]) => [m, Math.round(Math.min(...v))] as [number, number]);
+  };
+  const slope = (xy: [number, number][]) => {
+    const k = xy.length;
+    const sx = xy.reduce((s, [x]) => s + x, 0), sy = xy.reduce((s, [, y]) => s + y, 0);
+    const sxx = xy.reduce((s, [x]) => s + x * x, 0), sxy = xy.reduce((s, [x, y]) => s + x * y, 0);
+    return (k * sxy - sx * sy) / (k * sxx - sx * sx);
+  };
+  return async () => {
+    done = true;
+    await loop;
+    const live = floors("live"), outside = floors("outside");
+    return { scrapes: n, liveFloors: live, outsideFloors: outside, liveSlope: slope(live), outsideSlope: slope(outside) };
+  };
+}
+
 const scrapes = { ok: 0, failed: 0 };
 const addScrapes = (n: { ok: number; failed: number }) => {
   scrapes.ok += n.ok;
@@ -197,24 +249,48 @@ const info = (check: string, value: string) => report.push({ check, value, budge
   }
 }
 
-// 3. Soak: 12 minutes of mixed traffic, slope fitted after the 2-minute warmup.
+// 3. Soak: 12 minutes of mixed traffic. A leak is growth without a ceiling, so
+// the gate is on the two numbers a leak has to raise and nothing else does:
+// Go's live heap after collection, and anonymous memory outside Go's own
+// accounting (SQLite's allocator, say). Each minute contributes its lowest
+// reading, so data in flight at a collection doesn't count, and the slope is
+// fitted through those floors after the 2-minute warmup. RSS itself moves in
+// steps as Go returns pages to the OS and takes them back (ADR-0006), so it
+// has a ceiling, not a slope budget.
+//
+// SQLite's memory fills to a ceiling of about 4.5 MiB over the first ~6,000
+// stored results, then grows a few bytes per result. The soak stores only 360,
+// so the database is filled first and the soak measures the state a server
+// reaches after its first weeks, not the fill.
+const SEED_RESULTS = 8000;
+const SEED_BODY = `{"test_id":"seed","client":"footprint","device":"footprint-seed","download_mbps":938.2,"upload_mbps":412.6,"idle_ms":8.4,"loaded_down_ms":21,"loaded_up_ms":39.5,"jitter_ms":0.8,"streams":5,"client_limited":false}`;
 if (FULL) {
   const proc = await start();
   try {
+    log(`soak: storing ${SEED_RESULTS} results first`);
+    for (let i = 0; i < SEED_RESULTS; i++) {
+      const r = await fetch(`http://${ADDR}/api/v1/results`, { method: "POST", body: SEED_BODY, headers: { "content-type": "application/json" } });
+      await r.text();
+      if (r.status !== 201) throw new Error(`seeding results: HTTP ${r.status}`);
+      if (i % 4 === 0) await (await fetch(`http://${ADDR}/api/v1/results?limit=50`)).text();
+    }
     log("soak: 12 minutes of mixed traffic");
-    const stopScrape = scrape(5000);
+    const mem = memSampler(proc.pid, 2000);
     const s = await loadgen("soak", { addr: ADDR, pid: proc.pid, dur: "720s", sample: "5s" });
-    addScrapes(await stopScrape());
-    gate("soak RSS slope after 2 min warmup", s.slope_kib_per_min_after_2m, BUDGET.soakSlopeKiBPerMin, "KiB/min");
+    const m = await mem();
+    addScrapes(m.scrapes);
+    gate("soak live heap slope, per-minute floors", m.liveSlope, BUDGET.leakKiBPerMin, "KiB/min");
+    gate("soak memory outside Go, slope", m.outsideSlope, BUDGET.leakKiBPerMin, "KiB/min");
+    gate("soak RSS max", mib(s.rss_max_kib), BUDGET.peakRssMiB, "MiB");
     const errs = Object.entries(s.errors as Record<string, number>).map(([k, v]) => `${k} ${v}`).join(", ") || "none";
-    info("soak RSS first → last, max", `${mib(s.rss_first_kib).toFixed(1)} → ${mib(s.rss_last_kib).toFixed(1)} MiB, max ${mib(s.rss_max_kib).toFixed(1)} MiB; errors: ${errs}`);
+    info("soak RSS first → last; slope after 2 min", `${mib(s.rss_first_kib).toFixed(1)} → ${mib(s.rss_last_kib).toFixed(1)} MiB; ${s.slope_kib_per_min_after_2m.toFixed(0)} KiB/min; errors: ${errs}`);
     const { samples: _, ...soak } = s;
-    measured.soak = soak;
+    measured.soak = { ...soak, live_heap_floor_kib_by_min: m.liveFloors, outside_go_floor_kib_by_min: m.outsideFloors, live_heap_slope_kib_per_min: m.liveSlope, outside_go_slope_kib_per_min: m.outsideSlope };
   } finally {
     await stop(proc);
   }
 } else {
-  info("soak RSS slope", "skipped in quick mode; `make bench` runs it");
+  info("soak leak check", "skipped in quick mode; `make bench` runs it");
 }
 
 report.push({

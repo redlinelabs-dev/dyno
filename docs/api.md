@@ -163,6 +163,9 @@ the database at start.
 | `process_resident_memory_bytes` | gauge | | Resident memory, from `/proc/self/statm` at scrape time. Left out where that file doesn't exist |
 | `process_start_time_seconds` | gauge | | Process start, Unix seconds |
 | `go_goroutines` | gauge | | Goroutines running |
+| `go_gc_heap_live_bytes` | gauge | | Heap held by live objects as of the last garbage collection |
+| `go_memory_classes_total_bytes` | gauge | | All memory the Go runtime has mapped |
+| `go_memory_classes_heap_released_bytes` | gauge | | Heap memory the Go runtime has returned to the OS. Mapped minus released is what Go may have resident; the footprint soak uses it to tell Go's memory from SQLite's (ADR-0006) |
 
 Speeds are bits per second and latencies seconds, the Prometheus base units;
 results store Mbit/s and ms, and the server converts.

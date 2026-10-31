@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"runtime/metrics"
 	"sort"
 	"strconv"
 	"sync"
@@ -262,6 +263,19 @@ func (m *Metrics) Append(b []byte) []byte {
 	b = append(b, '\n')
 	b = header(b, "go_goroutines", "gauge", "Number of goroutines that currently exist.")
 	b = sampleUint(b, "go_goroutines", uint64(runtime.NumGoroutine()))
+
+	// Go's own memory accounting, which the soak's leak check reads (ADR-0006).
+	// Names as Prometheus's Go client exposes the same runtime/metrics.
+	mem := [...]metrics.Sample{{Name: "/gc/heap/live:bytes"}, {Name: "/memory/classes/total:bytes"}, {Name: "/memory/classes/heap/released:bytes"}}
+	metrics.Read(mem[:])
+	for i, g := range [...]struct{ name, help string }{
+		{"go_gc_heap_live_bytes", "Heap memory occupied by live objects as of the last garbage collection."},
+		{"go_memory_classes_total_bytes", "All memory mapped by the Go runtime."},
+		{"go_memory_classes_heap_released_bytes", "Heap memory the Go runtime has returned to the OS."},
+	} {
+		b = header(b, g.name, "gauge", g.help)
+		b = sampleUint(b, g.name, mem[i].Value.Uint64())
+	}
 	return b
 }
 

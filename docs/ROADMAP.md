@@ -48,7 +48,7 @@ Ordering below M2 comes from `docs/research/competitor-features.md` (2026-10-31)
 whose §5 ranks the requests dyno doesn't meet yet. Signal numbers in brackets
 are from there.
 
-## M2.5. Operate it (`/metrics` and structured logs; built 2026-10-31, NAS scrape and dashboard live, soak gate failing)
+## M2.5. Operate it (`/metrics` and structured logs; built 2026-10-31, NAS scrape and dashboard live)
 
 Needs: nothing open. Rules: ADR-0017 (nothing phones home; metrics on their
 own listener).
@@ -66,6 +66,9 @@ MySpeed all ship it [~37].
   - `dyno_bytes_sent_total`, `dyno_bytes_received_total`,
     `dyno_streams_active`, `dyno_requests_total{route,code}`
   - `process_resident_memory_bytes`, `go_goroutines`
+  - `go_gc_heap_live_bytes`, `go_memory_classes_total_bytes`,
+    `go_memory_classes_heap_released_bytes`, added for the soak leak check
+    (ADR-0006)
 - Logs move from `log.Printf` to `log/slog` JSON on stdout. Conventions, adapted
   from the wide-event style (Sentry's "structure a log", Stripe's canonical log
   lines): stable `domain.action` event names (`server.start`, `result.store`),

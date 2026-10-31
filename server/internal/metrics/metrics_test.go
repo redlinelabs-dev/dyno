@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -287,6 +288,7 @@ func TestExpositionIsValid(t *testing.T) {
 	m.StreamOpened(Upload)
 	m.CountRequest(RouteDL, 200)
 	m.CountRequest(RouteUI, 404)
+	runtime.GC() // the live heap reads 0 until the first collection
 	m.CountRequest(RouteUI, 404)
 	m.CountRequest(RouteOther, 99) // out of range: dropped
 
@@ -302,13 +304,14 @@ func TestExpositionIsValid(t *testing.T) {
 		"dyno_bytes_sent_total": "counter", "dyno_bytes_received_total": "counter",
 		"dyno_streams_active": "gauge", "dyno_requests_total": "counter",
 		"process_resident_memory_bytes": "gauge", "process_start_time_seconds": "gauge", "go_goroutines": "gauge",
+		"go_gc_heap_live_bytes": "gauge", "go_memory_classes_total_bytes": "gauge", "go_memory_classes_heap_released_bytes": "gauge",
 	} {
 		if f := fams[name]; f == nil || f.typ != typ {
 			t.Errorf("%s: %+v, want type %s", name, f, typ)
 		}
 	}
-	if len(fams) != 13 {
-		t.Errorf("%d families, want 13", len(fams))
+	if len(fams) != 16 {
+		t.Errorf("%d families, want 16", len(fams))
 	}
 
 	if v := find(t, fams["dyno_build_info"], "dyno_build_info", map[string]string{"version": m.version}); v != 1 {
@@ -360,6 +363,14 @@ func TestExpositionIsValid(t *testing.T) {
 	}
 	if v := find(t, fams["process_resident_memory_bytes"], "process_resident_memory_bytes", nil); v < 1<<20 {
 		t.Errorf("rss %v", v)
+	}
+	// The soak's leak check reads these (ADR-0006): live heap, and Go's mapped memory
+	// minus what it has handed back, which is at least the live heap.
+	live := find(t, fams["go_gc_heap_live_bytes"], "go_gc_heap_live_bytes", nil)
+	total := find(t, fams["go_memory_classes_total_bytes"], "go_memory_classes_total_bytes", nil)
+	released := find(t, fams["go_memory_classes_heap_released_bytes"], "go_memory_classes_heap_released_bytes", nil)
+	if live <= 0 || released < 0 || total-released < live {
+		t.Errorf("live %v, total %v, released %v", live, total, released)
 	}
 }
 

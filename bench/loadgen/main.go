@@ -163,6 +163,15 @@ func (k *conn) post(n int64, buf []byte, onSent func(int)) (int, error) {
 	return k.readResponse(buf, nil)
 }
 
+// postJSON sends a small JSON body to path.
+func (k *conn) postJSON(path, body string, buf []byte) (int, error) {
+	h := fmt.Sprintf("POST %s HTTP/1.1\r\nHost: bench\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", path, len(body), body)
+	if _, err := io.WriteString(k.c, h); err != nil {
+		return 0, err
+	}
+	return k.readResponse(buf, nil)
+}
+
 // ---- modes ----
 
 func out(v any) {
@@ -371,6 +380,17 @@ func soak() {
 		every("dl_4MiB", 10, 1, keepAlive(func(k *conn, b []byte) error { st, err := k.get("/dl?bytes=4194304", b, nil); return ok(st, err, 200) }))
 		every("ul_4MiB", 10, 1, keepAlive(func(k *conn, b []byte) error { st, err := k.post(4<<20, b, nil); return ok(st, err, 200) }))
 	}
+	// A stored result every 2 s and the history listed every second, as browsers
+	// finishing tests and opening History do, so the soak covers SQLite too.
+	const stored = `{"test_id":"soak","client":"loadgen","device":"loadgen-soak","download_mbps":938.2,"upload_mbps":412.6,"idle_ms":8.4,"loaded_down_ms":21,"loaded_up_ms":39.5,"jitter_ms":0.8,"streams":5,"client_limited":false}`
+	every("result_post", 0.5, 1, keepAlive(func(k *conn, b []byte) error {
+		st, err := k.postJSON("/api/v1/results", stored, b)
+		return ok(st, err, 201)
+	}))
+	every("results_list", 1, 1, keepAlive(func(k *conn, b []byte) error {
+		st, err := k.get("/api/v1/results?limit=50", b, nil)
+		return ok(st, err, 200)
+	}))
 	every("ping", 100, 1, keepAlive(func(k *conn, b []byte) error { st, err := k.get("/ping", b, nil); return ok(st, err, 204) }))
 	every("short_conn_ping", 50, 2, func(b []byte) error { return shortConn("/ping", b) })
 	every("short_conn_index", 10, 1, func(b []byte) error { return shortConn("/", b) })

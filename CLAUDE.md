@@ -41,7 +41,7 @@ ADR-0007.
 ## Rules that are easy to miss
 
 - **Footprint is a feature.** Every change to the server keeps idle RSS,
-  RSS under load, CPU per GB and the soak slope within the budgets in
+  RSS under load, CPU per GB and the soak leak check within the budgets in
   ADR-0006. Measure with `make bench`, paste its table into the PR, and
   treat a regression as a bug.
 - **The web UI is just another API client.** It uses only the public HTTP API
