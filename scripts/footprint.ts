@@ -23,6 +23,9 @@ const DYNO = "bin/dyno";
 const LOADGEN = "bin/loadgen";
 const PORT = 39660;
 const ADDR = `127.0.0.1:${PORT}`;
+// The metrics listener is on, as an operator with Prometheus runs it, and
+// gets scraped during the load phases, so ADR-0006 covers that setup too.
+const METRICS_ADDR = `127.0.0.1:${PORT + 1}`;
 
 // ADR-0006 budgets. Change them there first, with measurements.
 const BUDGET = {
@@ -61,7 +64,7 @@ process.on("exit", () => rmSync(DATA, { recursive: true, force: true }));
 
 async function start() {
   const proc = Bun.spawn(pinned(SERVER_CPUS, [DYNO]), {
-    env: { ...process.env, DYNO_LISTEN: ADDR, DYNO_DATA: DATA, GOMEMLIMIT: "64MiB" },
+    env: { ...process.env, DYNO_LISTEN: ADDR, DYNO_METRICS_LISTEN: METRICS_ADDR, DYNO_DATA: DATA, GOMEMLIMIT: "64MiB" },
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -80,6 +83,36 @@ async function stop(proc: Bun.Subprocess) {
   if (proc.exitCode === null) proc.kill("SIGKILL");
   await proc.exited;
 }
+
+// scrape fetches /metrics every everyMs until the returned stop is awaited,
+// counting scrapes and failures.
+function scrape(everyMs: number) {
+  let done = false;
+  const n = { ok: 0, failed: 0 };
+  const loop = (async () => {
+    while (!done) {
+      try {
+        const r = await fetch(`http://${METRICS_ADDR}/metrics`);
+        await r.arrayBuffer();
+        if (r.ok) n.ok++;
+        else n.failed++;
+      } catch {
+        n.failed++;
+      }
+      await sleep(everyMs);
+    }
+  })();
+  return async () => {
+    done = true;
+    await loop;
+    return n;
+  };
+}
+const scrapes = { ok: 0, failed: 0 };
+const addScrapes = (n: { ok: number; failed: number }) => {
+  scrapes.ok += n.ok;
+  scrapes.failed += n.failed;
+};
 
 async function loadgen(mode: string, flags: Record<string, string | number>, cpus = CLIENT_CPUS) {
   const argv = pinned(cpus, [LOADGEN, mode, ...Object.entries(flags).map(([k, v]) => `-${k}=${v}`)]);
@@ -111,8 +144,10 @@ const info = (check: string, value: string) => report.push({ check, value, budge
     log("peak RSS: 32 download streams, then 32 upload streams");
     await Bun.write(`/proc/${pid}/clear_refs`, "5"); // reset VmHWM
     const w = { pid, c: 32, bytes: 32 << 20, warmup: "1s", dur: FULL ? "6s" : "4s" };
+    const stopScrape = scrape(1000);
     const dl = await loadgen("dl", { addr: ADDR, ...w });
     const ul = await loadgen("ul", { addr: ADDR, ...w });
+    addScrapes(await stopScrape());
     const peak = procStatus(pid).VmHWM!;
     gate("peak RSS, 32 streams", mib(peak), BUDGET.peakRssMiB, "MiB");
     info("download, 32 streams", `${dl.gbit_s.toFixed(1)} Gbit/s, ${dl.cpu_s_per_gb.toFixed(3)} CPU-s/GB, ${dl.errors} errors`);
@@ -167,7 +202,9 @@ if (FULL) {
   const proc = await start();
   try {
     log("soak: 12 minutes of mixed traffic");
+    const stopScrape = scrape(5000);
     const s = await loadgen("soak", { addr: ADDR, pid: proc.pid, dur: "720s", sample: "5s" });
+    addScrapes(await stopScrape());
     gate("soak RSS slope after 2 min warmup", s.slope_kib_per_min_after_2m, BUDGET.soakSlopeKiBPerMin, "KiB/min");
     const errs = Object.entries(s.errors as Record<string, number>).map(([k, v]) => `${k} ${v}`).join(", ") || "none";
     info("soak RSS first → last, max", `${mib(s.rss_first_kib).toFixed(1)} → ${mib(s.rss_last_kib).toFixed(1)} MiB, max ${mib(s.rss_max_kib).toFixed(1)} MiB; errors: ${errs}`);
@@ -180,6 +217,13 @@ if (FULL) {
   info("soak RSS slope", "skipped in quick mode; `make bench` runs it");
 }
 
+report.push({
+  check: "metrics scrapes during load",
+  value: `${scrapes.ok} ok, ${scrapes.failed} failed`,
+  budget: "none failed",
+  pass: scrapes.ok > 0 && scrapes.failed === 0,
+});
+measured.metrics_scrapes = scrapes;
 info("binary size", `${(statSync(DYNO).size / 2 ** 20).toFixed(2)} MiB`);
 info("CPU pinning", pin ? `server ${SERVER_CPUS}, clients ${CLIENT_CPUS}` : "none (fewer than 8 cores or no taskset)");
 

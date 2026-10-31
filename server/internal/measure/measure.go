@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redlinelabs-dev/dyno/server/internal/metrics"
 	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
 
@@ -41,10 +42,12 @@ var readBufs = sync.Pool{New: func() any { b := make([]byte, readChunk); return 
 
 // Endpoints holds the measurement handlers. Stall is how long one read or
 // write may block before the connection is dropped. Runs, if set, counts the
-// bytes of requests tagged with a test id (?t=, from the plan).
+// bytes of requests tagged with a test id (?t=, from the plan). Metrics, if
+// set, counts every byte and in-flight stream, tagged or not.
 type Endpoints struct {
-	Stall time.Duration
-	Runs  *testrun.Registry
+	Stall   time.Duration
+	Runs    *testrun.Registry
+	Metrics *metrics.Metrics
 }
 
 func (e *Endpoints) counters(r *http.Request) *testrun.Counters {
@@ -72,6 +75,8 @@ func measurementHeaders(h http.Header) {
 
 // download streams ?bytes=N bytes of the random payload.
 func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
+	e.Metrics.StreamOpened(metrics.Download)
+	defer e.Metrics.StreamClosed(metrics.Download)
 	n, err := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)
 	if err != nil || n < 0 || n > MaxBytes {
 		http.Error(w, "bytes must be an integer from 0 to "+strconv.FormatInt(MaxBytes, 10), http.StatusBadRequest)
@@ -92,6 +97,7 @@ func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
 		c := min(int64(writeChunk), int64(PayloadSize-off), n)
 		rc.SetWriteDeadline(time.Now().Add(e.Stall))
 		k, err := w.Write(payload[off : off+int(c)])
+		e.Metrics.AddSent(k) // one atomic add per 256 KiB chunk
 		if tally != nil {
 			tally.Down.Add(int64(k))
 		}
@@ -106,6 +112,8 @@ func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
 // upload drains the body and reports what the server received. Upload speed
 // is computed from these numbers, never from client progress events (ADR-0003).
 func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
+	e.Metrics.StreamOpened(metrics.Upload)
+	defer e.Metrics.StreamClosed(metrics.Upload)
 	if r.ContentLength > MaxBytes {
 		tooLarge(w)
 		return
@@ -123,6 +131,7 @@ func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
 		if k > 0 {
 			total += int64(k)
 			last = time.Now()
+			e.Metrics.AddReceived(k) // one atomic add per read of up to 64 KiB
 			if tally != nil {
 				tally.Up.Add(int64(k))
 			}

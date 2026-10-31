@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redlinelabs-dev/dyno/server/internal/metrics"
 	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
 
@@ -250,5 +251,88 @@ func TestTaggedBytesAreCounted(t *testing.T) {
 
 	if down, up, ok := runs.Take(id); !ok || down != 300000 || up != 12345 {
 		t.Fatalf("counted down %d, up %d, ok %v", down, up, ok)
+	}
+}
+
+// discardWriter is a ResponseWriter that drops the body, so allocation
+// counts measure the handler and not a recorder's growing buffer.
+type discardWriter struct{ h http.Header }
+
+func (d *discardWriter) Header() http.Header              { return d.h }
+func (d *discardWriter) Write(p []byte) (int, error)      { return len(p), nil }
+func (d *discardWriter) WriteHeader(int)                  {}
+func (d *discardWriter) SetWriteDeadline(time.Time) error { return nil }
+func (d *discardWriter) SetReadDeadline(time.Time) error  { return nil }
+
+// ADR-0002's hot-path rule, with metrics on: the /dl write loop and /ul read
+// loop allocate nothing per iteration, so a request 64 times longer
+// allocates no more. The request wrapper and counters stay per request.
+func TestHotPathAllocationsDontGrowWithSize(t *testing.T) {
+	m := metrics.New("test")
+	mux := http.NewServeMux()
+	(&Endpoints{Stall: time.Second, Metrics: m}).Register(mux)
+	h := m.Instrument(mux)
+	allocs := func(method string, chunks int64, chunk int64) float64 {
+		body := bytes.NewReader(nil)
+		return testing.AllocsPerRun(50, func() {
+			var r *http.Request
+			if method == "GET" {
+				r = httptest.NewRequest("GET", "/dl?bytes="+strconv.FormatInt(chunks*chunk, 10), nil)
+			} else {
+				body.Reset(payload[:chunks*chunk])
+				r = httptest.NewRequest("POST", "/ul", body)
+			}
+			h.ServeHTTP(&discardWriter{h: http.Header{}}, r)
+		})
+	}
+	for _, c := range []struct {
+		method string
+		chunk  int64
+	}{{"GET", writeChunk}, {"POST", readChunk}} {
+		small, large := allocs(c.method, 1, c.chunk), allocs(c.method, 64, c.chunk)
+		// Under -race, sync.Pool drops one Put in four at random, so /ul's
+		// buffer is reallocated on a random share of runs and AllocsPerRun's
+		// truncated mean can differ by one. The rule is about the non-race
+		// build; `go test ./...` without -race still checks /ul.
+		if c.method == "POST" && raceEnabled {
+			continue
+		}
+		if large > small {
+			t.Errorf("%s: %.1f allocations for 1 chunk, %.1f for 64", c.method, small, large)
+		}
+	}
+	if got := m.Append(nil); !bytes.Contains(got, []byte(`dyno_streams_active{direction="download"} 0`)) ||
+		!bytes.Contains(got, []byte(`dyno_requests_total{route="dl",code="200"} 102`)) {
+		t.Errorf("metrics after the runs:\n%s", got)
+	}
+}
+
+func TestMetricsCountUntaggedBytes(t *testing.T) {
+	m := metrics.New("test")
+	mux := http.NewServeMux()
+	(&Endpoints{Stall: time.Second, Metrics: m, Runs: testrun.NewRegistry()}).Register(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/dl?bytes=" + strconv.Itoa(writeChunk+5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	resp, err = http.Post(srv.URL+"/ul?t=nope", "application/octet-stream", strings.NewReader("abcdefg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	srv.Close()
+	got := string(m.Append(nil))
+	for _, want := range []string{
+		"dyno_bytes_sent_total " + strconv.Itoa(writeChunk+5) + "\n",
+		"dyno_bytes_received_total 7\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("want %q in\n%s", want, got)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +21,7 @@ func newMux(t *testing.T) (*http.ServeMux, *API) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	a := &API{Version: "1.2.3", Store: st, Runs: testrun.NewRegistry()}
+	a := &API{Version: "1.2.3", Store: st, Runs: testrun.NewRegistry(), Log: slog.New(slog.DiscardHandler)}
 	mux := http.NewServeMux()
 	a.Register(mux)
 	return mux, a

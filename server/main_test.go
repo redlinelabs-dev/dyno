@@ -21,7 +21,7 @@ func startServer(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	srv.Config = newServer("test", time.Second, st)
+	srv.Config = newServer("test", time.Second, st, nil, nil)
 	srv.Start()
 	t.Cleanup(srv.Close)
 	return srv

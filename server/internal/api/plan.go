@@ -4,8 +4,10 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
+	"github.com/redlinelabs-dev/dyno/server/internal/metrics"
 	"github.com/redlinelabs-dev/dyno/server/internal/store"
 	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
@@ -85,11 +87,21 @@ func NewPlan(version, testID string) Plan {
 	}
 }
 
-// API holds what the /api/v1 handlers need.
+// API holds what the /api/v1 handlers need. Metrics, if set, counts stored
+// results. Log is where events go (ADR-0020); nil means slog.Default().
 type API struct {
 	Version string
 	Store   *store.Store
 	Runs    *testrun.Registry
+	Metrics *metrics.Metrics
+	Log     *slog.Logger
+}
+
+func (a *API) log() *slog.Logger {
+	if a.Log != nil {
+		return a.Log
+	}
+	return slog.Default()
 }
 
 // Register adds the /api/v1 routes to mux.
