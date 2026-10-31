@@ -16,7 +16,9 @@ behind progressive disclosure. Private repo, solo developer.
 - `docs/research/`: the evidence. Read the matching file before touching that
   area: `methodology-and-architecture.md` before any measurement code,
   `runtime-benchmark.md` before changing the server's runtime or hot path,
-  `market-and-demand.md` before adding a feature or touching licensing.
+  `market-and-demand.md` and `competitor-features.md` before adding a feature
+  (the latter ranks what competitors ship and what their users still ask
+  for), `market-and-demand.md` before touching licensing.
 - `prototypes/dyno-ui.html`: the signed-off UI (ADR-0004). The web UI matches
   it; it is the spec for look and behaviour. The other files there are the
   rounds it was picked from.

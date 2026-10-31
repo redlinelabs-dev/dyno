@@ -16,7 +16,7 @@ Evidence: `docs/research/methodology-and-architecture.md` §5.
 - **Endpoints, first cut:** `GET /api/v1/plan`, `GET /dl` (stream N
   incompressible bytes), `POST /ul` (drain and count), `GET /ping` (204, on
   its own connection), `POST /api/v1/results`, `GET /api/v1/results`,
-  `GET /metrics` (Prometheus), `GET /.well-known/nq` (Apple
+  `GET /metrics` (Prometheus, on its own listener per ADR-0017), `GET /.well-known/nq` (Apple
   `networkQuality` compatibility). Version the JSON API from day one.
 - **Storage:** SQLite in WAL mode on a local volume (not NFS or SMB). One file,
   with retention configurable from forever down to N days.
