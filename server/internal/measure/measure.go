@@ -6,6 +6,7 @@ package measure
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -79,7 +80,7 @@ func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
 	defer e.Metrics.StreamClosed(metrics.Download)
 	n, err := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)
 	if err != nil || n < 0 || n > MaxBytes {
-		http.Error(w, "bytes must be an integer from 0 to "+strconv.FormatInt(MaxBytes, 10), http.StatusBadRequest)
+		fail(w, http.StatusBadRequest, "bytes must be an integer from 0 to "+strconv.FormatInt(MaxBytes, 10))
 		return
 	}
 	tally := e.counters(r)
@@ -126,8 +127,10 @@ func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
 	var total int64
 	last := start
 	for {
+		// The stall timeout covers a whole 64 KiB read, not each Read call, so
+		// a client dripping a byte at a time can't hold the connection open.
 		rc.SetReadDeadline(time.Now().Add(e.Stall))
-		k, err := r.Body.Read(*bp)
+		k, err := fill(r.Body, *bp)
 		if k > 0 {
 			total += int64(k)
 			last = time.Now()
@@ -151,7 +154,7 @@ func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
 				code = http.StatusRequestTimeout
 			}
 			w.Header().Set("Connection", "close")
-			http.Error(w, "upload stalled or aborted", code)
+			fail(w, code, "upload stalled or aborted")
 			return
 		}
 	}
@@ -178,5 +181,33 @@ func ping(w http.ResponseWriter, r *http.Request) {
 
 func tooLarge(w http.ResponseWriter) {
 	w.Header().Set("Connection", "close")
-	http.Error(w, "upload larger than "+strconv.FormatInt(MaxBytes, 10)+" bytes", http.StatusRequestEntityTooLarge)
+	fail(w, http.StatusRequestEntityTooLarge, "upload larger than "+strconv.FormatInt(MaxBytes, 10)+" bytes")
+}
+
+// fail answers with {"error": msg}, like the rest of the API, and the
+// measurement headers, so a proxy treats an error like any other reply.
+func fail(w http.ResponseWriter, code int, msg string) {
+	h := w.Header()
+	measurementHeaders(h)
+	h.Set("Content-Type", "application/json")
+	h.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(code)
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	w.Write(append(b, '\n'))
+}
+
+// fill reads into b until it is full or the body ends. Unlike io.ReadFull it
+// returns the body's own error: io.EOF when the body finished, a short last
+// chunk included, and io.ErrUnexpectedEOF when it was cut short of its
+// Content-Length, which is an aborted upload.
+func fill(r io.Reader, b []byte) (int, error) {
+	n := 0
+	for n < len(b) {
+		k, err := r.Read(b[n:])
+		n += k
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }

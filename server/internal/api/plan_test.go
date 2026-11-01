@@ -39,7 +39,7 @@ const wantPlan = `{"test_id":"<id>","server":{"name":"dyno","version":"1.2.3"},`
 	`"endpoints":{"download":"/dl","upload":"/ul","ping":"/ping","results":"/api/v1/results"},` +
 	`"latency":{"idle_samples":20,"loaded_interval_ms":200},` +
 	`"download":{"streams":5,"duration_ms":10000,"warmup_ms":1500,"start_bytes":1048576,"max_bytes":268435456,"target_request_ms":1000},` +
-	`"upload":{"streams":5,"duration_ms":10000,"warmup_ms":3000,"start_bytes":1048576,"max_bytes":33554432,"target_request_ms":1000}}` + "\n"
+	`"upload":{"streams":5,"duration_ms":10000,"warmup_ms":3000,"start_bytes":262144,"max_bytes":33554432,"target_request_ms":1000}}` + "\n"
 
 func TestPlan(t *testing.T) {
 	mux, _ := newMux(t)

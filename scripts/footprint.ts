@@ -263,7 +263,7 @@ const info = (check: string, value: string) => report.push({ check, value, budge
 // so the database is filled first and the soak measures the state a server
 // reaches after its first weeks, not the fill.
 const SEED_RESULTS = 8000;
-const SEED_BODY = `{"test_id":"seed","client":"footprint","device":"footprint-seed","download_mbps":938.2,"upload_mbps":412.6,"idle_ms":8.4,"loaded_down_ms":21,"loaded_up_ms":39.5,"jitter_ms":0.8,"streams":5,"client_limited":false}`;
+const SEED_BODY = `{"test_id":"","client":"footprint","device":"footprint-seed","download_mbps":938.2,"upload_mbps":412.6,"idle_ms":8.4,"loaded_down_ms":21,"loaded_up_ms":39.5,"jitter_ms":0.8,"streams":5,"client_limited":false}`;
 if (FULL) {
   const proc = await start();
   try {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -27,7 +28,11 @@ func (a *API) addResult(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	var sub result.Submission
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxResultBody))
-	if err := dec.Decode(&sub); err != nil {
+	err := dec.Decode(&sub)
+	if err == nil && dec.Decode(&struct{}{}) != io.EOF {
+		err = errors.New("one JSON object only; found more after it")
+	}
+	if err != nil {
 		code := "invalid_json"
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			code = "body_too_large"
@@ -46,7 +51,7 @@ func (a *API) addResult(w http.ResponseWriter, r *http.Request) {
 		res.ServerBytesDown, res.ServerBytesUp = down, up
 	}
 	res.Derive()
-	res, err := a.Store.Add(res)
+	res, err = a.Store.Add(res)
 	if err != nil {
 		a.logStore(r.Context(), start, http.StatusInternalServerError, &res, "store_write_failed", err)
 		writeError(w, http.StatusInternalServerError, "could not store the result")

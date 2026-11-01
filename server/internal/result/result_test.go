@@ -25,6 +25,14 @@ func TestDeriveUsesWorseDirection(t *testing.T) {
 	}
 }
 
+func TestRPMIsCapped(t *testing.T) {
+	r := Result{Submission: Submission{LoadedDownMs: 1e-300}}
+	r.Derive()
+	if r.RPM != maxRPM {
+		t.Fatalf("RPM = %d", r.RPM)
+	}
+}
+
 func TestDeriveWithoutLoadedLatency(t *testing.T) {
 	r := Result{Submission: Submission{IdleMs: 8}}
 	r.Derive()
@@ -34,12 +42,13 @@ func TestDeriveWithoutLoadedLatency(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	for _, bad := range []Submission{{DownloadMbps: -1}, {IdleMs: math.NaN()}, {UploadMbps: math.Inf(1)}, {Streams: 99}, {Device: "a b"}, {Device: strings.Repeat("x", 65)}} {
+	for _, bad := range []Submission{{DownloadMbps: -1}, {IdleMs: math.NaN()}, {UploadMbps: math.Inf(1)}, {Streams: 99}, {Device: "a b"}, {Device: strings.Repeat("x", 65)},
+		{}, {IdleMs: 1, TestID: "soak"}, {IdleMs: 1, TestID: strings.Repeat("a", 25)}, {IdleMs: 1, TestID: strings.Repeat("A", 24)}} {
 		if bad.Validate() == nil {
 			t.Errorf("accepted %+v", bad)
 		}
 	}
-	long := Submission{Client: string(make([]byte, 500))}
+	long := Submission{Client: string(make([]byte, 500)), IdleMs: 1, TestID: strings.Repeat("0f", 12)}
 	if err := long.Validate(); err != nil || len(long.Client) != maxClientLen {
 		t.Errorf("client label not trimmed: len %d, err %v", len(long.Client), err)
 	}

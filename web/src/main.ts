@@ -677,7 +677,7 @@ function drawSpeed(b: HTMLElement, full: boolean) {
   const fromClient = run.detail.upload_from_client
     ? `<p class="note">No upload request finished in time, so upload speed is this browser's own count rather than the server's.</p>`
     : "";
-  b.querySelector("#ch-info")!.innerHTML = `<p class="note">The shaded start of each transfer is warm-up. It isn't counted in the result, so a result can sit below the peak.</p>
+  b.querySelector("#ch-info")!.innerHTML = `<p class="note">The shaded start of each transfer is warm-up. Neither the result nor the peak counts it.</p>
   <dl class="kv"><dt>Connections</dt><dd>${run.streams || "–"}${run.auto && run.streams ? ", auto" : ""}</dd></dl>${fromClient}`;
 }
 
@@ -732,6 +732,8 @@ function setupBody(): string {
   <div class="exp"><button class="sbtn" data-copy${has ? "" : " disabled"}>Copy result as JSON</button><span class="note" aria-live="polite" data-copied></span></div></div>`;
 }
 
+const HISTORY_LIMIT = 50;
+
 async function drawHistory(b: HTMLElement) {
   // The switch stays put while the list reloads, so keyboard focus survives a change of view.
   if (!b.querySelector("#hist-list")) {
@@ -749,7 +751,7 @@ async function drawHistory(b: HTMLElement) {
   out.innerHTML = `<p class="note">Loading…</p>`;
   let list: StoredResult[];
   try {
-    list = (await getJSON<{ results: StoredResult[] }>(`api/v1/results?limit=50${all ? "" : `&device=${DEVICE}`}`)).results;
+    list = (await getJSON<{ results: StoredResult[] }>(`api/v1/results?limit=${HISTORY_LIMIT}${all ? "" : `&device=${DEVICE}`}`)).results;
   } catch (err) {
     if (A.sheet === "history" && A.histAll === all) out.innerHTML = `<p class="note">Couldn't load history: ${esc((err as Error).message)}</p>`;
     return;
@@ -768,20 +770,26 @@ async function drawHistory(b: HTMLElement) {
       d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
     )}</span>`;
   };
+  // Markup, not text: the name sits in <bdi>, so right-to-left characters in it
+  // can't reorder the rest of the row.
   const from = (r: StoredResult) =>
-    (r.source === "client" ? r.client || "Browser" : r.source === "schedule" ? "Scheduled" : r.source) + (r.device === DEVICE ? " (this device)" : "");
+    `<bdi>${esc(r.source === "client" ? r.client || "Browser" : r.source === "schedule" ? "Scheduled" : r.source)}</bdi>${r.device === DEVICE ? " (this device)" : ""}`;
   // All devices names each row's device: in its own column, or under the time on a phone.
   out.innerHTML = `<div class="tw" role="region" aria-label="Test history" tabindex="0"><table class="hist"><thead><tr><th>When</th><th>Down</th><th>Up</th><th>Latency</th><th>Grade</th>${
     all ? `<th class="from">From</th>` : ""
   }</tr></thead><tbody>${list
     .map(
       (r) =>
-        `<tr><td class="when">${when(r.at)}${all ? `<span class="dev">${esc(from(r))}</span>` : ""}</td><td class="n">${fmt(r.download_mbps)}</td><td class="n">${fmt(
+        `<tr><td class="when">${when(r.at)}${all ? `<span class="dev">${from(r)}</span>` : ""}</td><td class="n">${fmt(r.download_mbps)}</td><td class="n">${fmt(
           r.upload_mbps,
-        )}</td><td class="n">${fms(r.idle_ms)} ms</td><td>${esc(r.grade || "–")}</td>${all ? `<td class="from">${esc(from(r))}</td>` : ""}</tr>`,
+        )}</td><td class="n">${fms(r.idle_ms)} ms</td><td>${esc(r.grade || "–")}</td>${all ? `<td class="from">${from(r)}</td>` : ""}</tr>`,
     )
     .join("")}</tbody></table></div><p class="note">${
-    all ? "Every test run against this server" : `Tests from this device (${esc(S.name || clientLabel())})`
+    list.length === HISTORY_LIMIT
+      ? `The newest ${HISTORY_LIMIT} tests ${all ? "run against this server" : "from this device"}`
+      : all
+        ? "Every test run against this server"
+        : `Tests from this device (${esc(S.name || clientLabel())})`
   }, newest first. Speeds in ${unit()}; latency is idle latency.</p>`;
 }
 

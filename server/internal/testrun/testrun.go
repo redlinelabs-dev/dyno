@@ -1,6 +1,7 @@
 // Package testrun counts the bytes the server itself moved for each test, so a
 // stored result carries the server's view next to the client's (ADR-0002).
-// Memory is bounded: at most maxRuns tests are tracked, oldest evicted first.
+// Only ids the server issued with a plan are counted, each for maxAge, and at
+// most maxRuns at a time.
 package testrun
 
 import (
@@ -23,14 +24,17 @@ type Counters struct {
 	created time.Time
 }
 
+func (c *Counters) idle() bool { return c.Down.Load() == 0 && c.Up.Load() == 0 }
+
 // Registry maps test ids to counters.
 type Registry struct {
 	mu   sync.Mutex
 	runs map[string]*Counters
+	now  func() time.Time // time.Now, except in tests
 }
 
 func NewRegistry() *Registry {
-	return &Registry{runs: make(map[string]*Counters, maxRuns)}
+	return &Registry{runs: make(map[string]*Counters, maxRuns), now: time.Now}
 }
 
 // NewID returns a fresh random test id.
@@ -40,8 +44,7 @@ func NewID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// ValidID reports whether id looks like one NewID made. Anything else is
-// ignored, so a client can't fill the registry with junk keys.
+// ValidID reports whether id looks like one NewID made.
 func ValidID(id string) bool {
 	if len(id) != 24 {
 		return false
@@ -55,52 +58,70 @@ func ValidID(id string) bool {
 	return true
 }
 
-// Get returns the counters for id, creating them if needed. It returns nil
-// for an invalid id, so callers count nothing.
-func (r *Registry) Get(id string) *Counters {
-	if !ValidID(id) {
-		return nil
-	}
+// New issues a test id and starts counting for it. When the registry is full
+// it drops an expired run, else the oldest run that hasn't moved a byte. If
+// every run is live, the id is still returned but its bytes go uncounted:
+// a burst of plans must not wipe the counts of tests already running.
+func (r *Registry) New() string {
+	id := NewID()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if c, ok := r.runs[id]; ok {
-		return c
+	now := r.now()
+	if len(r.runs) >= maxRuns && !r.evict(now) {
+		return id
 	}
-	now := time.Now()
-	if len(r.runs) >= maxRuns {
-		r.evict(now)
+	r.runs[id] = &Counters{created: now}
+	return id
+}
+
+// Get returns the counters for an id New issued, or nil if the server didn't
+// issue it, has stopped counting it, or it expired, so callers count nothing.
+func (r *Registry) Get(id string) *Counters {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.runs[id]
+	if !ok {
+		return nil
 	}
-	c := &Counters{created: now}
-	r.runs[id] = c
+	if r.now().Sub(c.created) > maxAge {
+		delete(r.runs, id)
+		return nil
+	}
 	return c
 }
 
 // Take removes and returns the totals for id; ok is false if the server never
-// saw that test or has already forgotten it.
+// issued that id or has forgotten it.
 func (r *Registry) Take(id string) (down, up int64, ok bool) {
 	r.mu.Lock()
 	c, ok := r.runs[id]
 	delete(r.runs, id)
+	expired := ok && r.now().Sub(c.created) > maxAge
 	r.mu.Unlock()
-	if !ok {
+	if !ok || expired {
 		return 0, 0, false
 	}
 	return c.Down.Load(), c.Up.Load(), true
 }
 
-// evict drops expired runs, or the oldest one if none have expired.
-func (r *Registry) evict(now time.Time) {
+// evict drops every expired run, or failing that the oldest idle one, and
+// reports whether it freed a slot.
+func (r *Registry) evict(now time.Time) bool {
+	freed := false
 	var oldest string
 	for id, c := range r.runs {
 		if now.Sub(c.created) > maxAge {
 			delete(r.runs, id)
+			freed = true
 			continue
 		}
-		if oldest == "" || c.created.Before(r.runs[oldest].created) {
+		if c.idle() && (oldest == "" || c.created.Before(r.runs[oldest].created)) {
 			oldest = id
 		}
 	}
-	if len(r.runs) >= maxRuns {
+	if !freed && oldest != "" {
 		delete(r.runs, oldest)
+		freed = true
 	}
+	return freed
 }

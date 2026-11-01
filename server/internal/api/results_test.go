@@ -17,7 +17,7 @@ const submission = `{"test_id":"%s","client":"Safari on iPhone","download_mbps":
 
 func TestPostResultAttachesServerCountsAndGrade(t *testing.T) {
 	mux, a := newMux(t)
-	id := testrun.NewID()
+	id := a.Runs.New()
 	c := a.Runs.Get(id)
 	c.Down.Add(5000)
 	c.Up.Add(700)
@@ -50,7 +50,7 @@ func TestPostResultAttachesServerCountsAndGrade(t *testing.T) {
 
 func TestPostResultWithoutKnownTestStillStores(t *testing.T) {
 	mux, _ := newMux(t)
-	w := do(mux, "POST", "/api/v1/results", strings.Replace(submission, "%s", "nope", 1))
+	w := do(mux, "POST", "/api/v1/results", strings.Replace(submission, "%s", testrun.NewID(), 1)) // well formed, never issued
 	if w.Code != 201 || !strings.Contains(w.Body.String(), `"server_bytes_down":0`) {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
@@ -109,7 +109,7 @@ func oneEvent(t *testing.T, b *bytes.Buffer) map[string]any {
 func TestStoreEventOnSuccess(t *testing.T) {
 	mux, a := newMux(t)
 	logs := logTo(a)
-	id := testrun.NewID()
+	id := a.Runs.New()
 	a.Runs.Get(id).Down.Add(5000)
 	if w := do(mux, "POST", "/api/v1/results", strings.Replace(submission, "%s", id, 1)); w.Code != 201 {
 		t.Fatalf("status %d", w.Code)
@@ -143,6 +143,9 @@ func TestStoreEventOnFailure(t *testing.T) {
 		{`not json`, "WARN", "invalid_json", false},
 		{`{"client":"` + strings.Repeat("x", 300<<10) + `"}`, "WARN", "body_too_large", false},
 		{`{"download_mbps":-5}`, "WARN", "invalid_result", false},
+		{`{}`, "WARN", "invalid_result", false},
+		{`{"test_id":"` + strings.Repeat("a", 1000) + `","idle_ms":5}`, "WARN", "invalid_result", false},
+		{`{"idle_ms":5} {"idle_ms":6}`, "WARN", "invalid_json", false},
 	} {
 		mux, a := newMux(t)
 		logs := logTo(a)
@@ -164,7 +167,7 @@ func TestStoreEventOnFailure(t *testing.T) {
 	mux, a := newMux(t)
 	logs := logTo(a)
 	a.Store.Close()
-	if w := do(mux, "POST", "/api/v1/results", strings.Replace(submission, "%s", "x", 1)); w.Code != 500 {
+	if w := do(mux, "POST", "/api/v1/results", strings.Replace(submission, "%s", "", 1)); w.Code != 500 {
 		t.Fatalf("status %d", w.Code)
 	}
 	ev := oneEvent(t, logs)
@@ -176,7 +179,7 @@ func TestStoreEventOnFailure(t *testing.T) {
 func TestListResultsForOneDevice(t *testing.T) {
 	mux, _ := newMux(t)
 	for _, dev := range []string{"Kq3-x_9", "other", "Kq3-x_9"} {
-		body := strings.Replace(strings.Replace(submission, "%s", "t", 1), `"client":`, `"device":"`+dev+`","client":`, 1)
+		body := strings.Replace(strings.Replace(submission, "%s", "", 1), `"client":`, `"device":"`+dev+`","client":`, 1)
 		if w := do(mux, "POST", "/api/v1/results", body); w.Code != 201 {
 			t.Fatalf("post: %d %s", w.Code, w.Body)
 		}

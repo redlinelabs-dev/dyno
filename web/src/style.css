@@ -67,6 +67,8 @@ button { -webkit-tap-highlight-color: transparent; font-family: inherit }
 .hist th { text-align: left; font-weight: 500; color: var(--s-mute); font-size: 12.5px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--s-line) }
 .hist td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--s-line); white-space: nowrap }
 .hist td.n { font-family: var(--f-num); font-weight: 700; font-size: 16px }
+/* A device name is anyone's text: it wraps anywhere rather than widening the table. */
+.hist td.from, .hist .dev { white-space: normal; overflow-wrap: anywhere; min-width: 10ch }
 .hscope { margin-bottom: 16px }
 .hist .dev { display: none }
 /* Phones: date over time, and the device under them rather than in a From
@@ -157,8 +159,10 @@ html.sheet-open { overflow: hidden }
 @container stage (max-width: 640px) {
   .sheet-head { flex-wrap: nowrap }
   .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0 }
-  .sheet, .sheet-wrap { grid-template-columns: minmax(0, 1fr) }
 }
+/* The sheet's grid column never grows past the sheet, so a wide child scrolls
+   inside its own box instead of pushing Close off-screen. */
+.sheet, .sheet-wrap, .pnlx { grid-template-columns: minmax(0, 1fr) }
 @container stage (max-width: 480px) { .tabs button { padding: 7px 10px } .tabs .long { display: none } .tabs .short { display: inline } }
 /* Phones: the sheet takes the screen at one height for every tab, so switching
    tabs doesn't make it jump, and the tabs stay pinned while Speed scrolls. The

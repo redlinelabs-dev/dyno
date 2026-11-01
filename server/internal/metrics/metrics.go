@@ -155,7 +155,7 @@ func (m *Metrics) CountRequest(route Route, code int) {
 }
 
 // ObserveResult counts one stored result. Results hold Mbit/s and ms; the
-// metrics use base units, bits per second and seconds. Loaded latency is the
+// metrics use base units, bytes per second and seconds. Loaded latency is the
 // worse of the two directions and is skipped when it wasn't measured.
 func (m *Metrics) ObserveResult(r result.Result) {
 	if m == nil {

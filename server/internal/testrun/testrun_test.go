@@ -1,10 +1,16 @@
 package testrun
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestCountAndTake(t *testing.T) {
 	r := NewRegistry()
-	id := NewID()
+	id := r.New()
+	if !ValidID(id) {
+		t.Fatalf("New returned %q", id)
+	}
 	r.Get(id).Down.Add(100)
 	r.Get(id).Up.Add(7)
 	down, up, ok := r.Take(id)
@@ -16,26 +22,69 @@ func TestCountAndTake(t *testing.T) {
 	}
 }
 
-func TestInvalidIDsAreIgnored(t *testing.T) {
+func TestOnlyIssuedIDsAreCounted(t *testing.T) {
 	r := NewRegistry()
-	for _, id := range []string{"", "x", "ZZZZZZZZZZZZZZZZZZZZZZZZ", NewID() + "0"} {
+	for _, id := range []string{"", "x", "ZZZZZZZZZZZZZZZZZZZZZZZZ", NewID(), NewID() + "0"} {
 		if r.Get(id) != nil {
-			t.Errorf("Get(%q) tracked an invalid id", id)
+			t.Errorf("Get(%q) counted an id the server never issued", id)
 		}
+	}
+	if len(r.runs) != 0 {
+		t.Fatalf("%d runs tracked", len(r.runs))
 	}
 }
 
-func TestBounded(t *testing.T) {
+// A burst of plans must not wipe the counts of tests already moving bytes.
+func TestFullRegistryKeepsLiveRuns(t *testing.T) {
 	r := NewRegistry()
-	first := NewID()
-	r.Get(first)
+	live := r.New()
+	r.Get(live).Down.Add(1)
 	for range 2 * maxRuns {
-		r.Get(NewID())
+		r.New()
 	}
 	if n := len(r.runs); n > maxRuns {
 		t.Fatalf("%d runs tracked, cap is %d", n, maxRuns)
 	}
-	if _, _, ok := r.Take(first); ok {
-		t.Fatal("oldest run was not evicted")
+	if down, _, ok := r.Take(live); !ok || down != 1 {
+		t.Fatal("a live run was evicted")
+	}
+}
+
+func TestFullOfLiveRunsCountsNothingNew(t *testing.T) {
+	r := NewRegistry()
+	for range maxRuns {
+		r.Get(r.New()).Up.Add(1)
+	}
+	id := r.New()
+	if r.Get(id) != nil {
+		t.Fatal("a run was added past the cap")
+	}
+	if len(r.runs) != maxRuns {
+		t.Fatalf("%d runs tracked", len(r.runs))
+	}
+}
+
+func TestRunsExpire(t *testing.T) {
+	r := NewRegistry()
+	now := time.Now()
+	r.now = func() time.Time { return now }
+	id := r.New()
+	r.Get(id).Down.Add(5)
+	gone := r.New()
+	now = now.Add(maxAge + time.Second)
+	if r.Get(id) != nil {
+		t.Fatal("Get returned an expired run")
+	}
+	if _, _, ok := r.Take(gone); ok {
+		t.Fatal("Take returned an expired run")
+	}
+
+	// Expired runs make room even when every run moved bytes.
+	for range maxRuns {
+		r.Get(r.New()).Up.Add(1)
+	}
+	now = now.Add(maxAge + time.Second)
+	if r.Get(r.New()) == nil {
+		t.Fatal("expired runs weren't evicted to make room")
 	}
 }

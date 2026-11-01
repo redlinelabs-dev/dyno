@@ -382,7 +382,7 @@ func soak() {
 	}
 	// A stored result every 2 s and the history listed every second, as browsers
 	// finishing tests and opening History do, so the soak covers SQLite too.
-	const stored = `{"test_id":"soak","client":"loadgen","device":"loadgen-soak","download_mbps":938.2,"upload_mbps":412.6,"idle_ms":8.4,"loaded_down_ms":21,"loaded_up_ms":39.5,"jitter_ms":0.8,"streams":5,"client_limited":false}`
+	const stored = `{"test_id":"","client":"loadgen","device":"loadgen-soak","download_mbps":938.2,"upload_mbps":412.6,"idle_ms":8.4,"loaded_down_ms":21,"loaded_up_ms":39.5,"jitter_ms":0.8,"streams":5,"client_limited":false}`
 	every("result_post", 0.5, 1, keepAlive(func(k *conn, b []byte) error {
 		st, err := k.postJSON("/api/v1/results", stored, b)
 		return ok(st, err, 201)
@@ -502,10 +502,14 @@ func hold() {
 	time.Sleep(2 * time.Second)
 	held := readProc(*pid)
 	time.Sleep(*dur)
+	// One buffer and a 20 ms deadline per read: allocating in this loop set off a
+	// GC that outlasted a 1 ms deadline, so a connection the server had closed
+	// long before read as open (the 2026-11-01 flake).
 	closed := 0
+	buf := make([]byte, 4096)
 	for _, c := range conns {
-		c.SetReadDeadline(time.Now().Add(time.Millisecond))
-		if n, err := c.Read(make([]byte, 4096)); n > 0 || err == io.EOF || errors.Is(err, syscall.ECONNRESET) {
+		c.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+		if n, err := c.Read(buf); n > 0 || err == io.EOF || errors.Is(err, syscall.ECONNRESET) {
 			closed++
 		}
 	}

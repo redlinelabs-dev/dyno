@@ -44,7 +44,7 @@ export function model(c: ChartInput): Model {
   let vMax = c.floor;
   for (const p of d.rate) vMax = Math.max(vMax, p[1]);
   for (const v of [c.down, c.up]) if (v) vMax = Math.max(vMax, v);
-  let msMax = Math.max(4, c.idleMs ?? 0);
+  let msMax = Math.max(4, c.idleMs || 0); // || also catches NaN: a missing idle latency must not collapse the axis
   for (const p of d.probes) msMax = Math.max(msMax, p[1]);
   const [vTop, vStep] = nice(c.conv(vMax));
   const [msTop, msStep] = nice(msMax);
@@ -204,7 +204,7 @@ function timeline(M: Model, hover: Hover | null): string {
   return `<div class="ch-panel"><div class="ch-head"><h2>Throughput</h2><span>${M.unit}</span></div>
     ${plot(M, F, "tp", tp, tpLabels, M.vStep, M.vTop, hover)}
     <table class="ch-lg named"><thead><tr><td></td><th scope="col">Result</th><th scope="col">Peak</th></tr></thead><tbody>
-      ${legendRow("down", "Download", M.down, peak(M.rate[0]!))}${legendRow("up", "Upload", M.up, peak(M.rate[1]!))}</tbody></table></div>
+      ${legendRow("down", "Download", M.down, peakRate(M.rate[0]!, M.spans, 0))}${legendRow("up", "Upload", M.up, peakRate(M.rate[1]!, M.spans, 1))}</tbody></table></div>
   <div class="ch-panel"><div class="ch-head"><h2>Latency</h2><span>ms</span></div>
     ${plot(M, F, "lp", lp, idleLabel, M.msStep, M.msTop, hover)}
     <table class="ch-lg named"><thead><tr><td></td><th scope="col">Idle</th><th scope="col">Downloading</th><th scope="col">Uploading</th><th scope="col">Peak</th></tr></thead><tbody><tr>
@@ -232,7 +232,7 @@ function transfer(M: Model, hover: Hover | null, sp: Span, i: number): string {
 
   return `<section class="ch-panel ch-phase" aria-label="${name}"><div class="ch-head"><h2><i class="ch-k ${dir ? "up" : "down"}"></i>${name}</h2><span>${M.unit}</span></div>
     ${plot(M, F, "tp", tp, label, M.vStep, M.vTop, here)}
-    <table class="ch-lg"><thead><tr><th scope="col">Result</th><th scope="col">Peak</th></tr></thead><tbody><tr><td>${M.fmt(dir ? M.up : M.down)}</td><td>${M.fmt(peak(M.rate[dir]!))}</td></tr></tbody></table>
+    <table class="ch-lg"><thead><tr><th scope="col">Result</th><th scope="col">Peak</th></tr></thead><tbody><tr><td>${M.fmt(dir ? M.up : M.down)}</td><td>${M.fmt(peakRate(M.rate[dir]!, M.spans, dir as 0 | 1))}</td></tr></tbody></table>
     <div class="ch-head ch-sub"><h3><i class="ch-k lat"></i>Latency while ${dir ? "uploading" : "downloading"}</h3><span>ms</span></div>
     ${plot(M, F, "lp", lp, idleLabel, M.msStep, M.msTop, here)}
     <table class="ch-lg"><thead><tr><th scope="col">Loaded</th><th scope="col">Idle</th><th scope="col">Peak</th></tr></thead><tbody><tr><td>${M.fms(median(M.probes[dir]!, M.spans, dir))}</td><td>${M.fms(M.idleMs)}</td><td>${M.fms(peak(M.probes[dir]!))}</td></tr></tbody></table></section>`;
@@ -248,6 +248,12 @@ function section(M: Model, t: number): number {
 }
 
 const peak = (a: [number, number, ...unknown[]][]) => (a.length ? Math.max(...a.map((p) => p[1])) : null);
+
+/** A direction's peak speed after its warm-up, the part the result counts. Upload's samples spread each request's bytes over its time, which overshoots while warm-up is still sizing requests. */
+const peakRate = (a: [number, number, 0 | 1][], spans: Span[], dir: 0 | 1) => {
+  const counted = spans.find((s) => s[0] === dir)?.[2] ?? 0;
+  return peak(a.filter((p) => p[0] >= counted));
+};
 
 /** The median of a direction's probes after its warm-up, as the result counts them. */
 function median(a: [number, number, 0 | 1][], spans: Span[], dir: 0 | 1): number | null {

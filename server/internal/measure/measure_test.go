@@ -226,6 +226,55 @@ func TestUploadStallTimesOut(t *testing.T) {
 	}
 }
 
+// A client dripping a byte at a time can't hold a connection past the stall
+// timeout: it covers a whole 64 KiB read (the 256-connection lockout in the
+// 2026-11-01 test sweep).
+func TestUploadDripTimesOut(t *testing.T) {
+	const stall = 300 * time.Millisecond
+	srv := newServer(t, stall)
+	c := dial(t, srv)
+	io.WriteString(c, "POST /ul HTTP/1.1\r\nHost: t\r\nContent-Length: 1048576\r\n\r\n")
+	began := time.Now()
+	go func() {
+		for range 40 {
+			if _, err := c.Write([]byte{0}); err != nil {
+				return
+			}
+			time.Sleep(stall / 4)
+		}
+	}()
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	resp, err := http.ReadResponse(c.br, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestTimeout {
+		t.Fatalf("status %d, want 408", resp.StatusCode)
+	}
+	if took := time.Since(began); took > 3*stall {
+		t.Fatalf("drip held the connection %v; stall timeout is %v", took, stall)
+	}
+}
+
+// A body cut short of its Content-Length is an aborted upload, not a short one
+// that finished: answering 200 would let a partial count stand as the result.
+func TestTruncatedUploadIsAnError(t *testing.T) {
+	srv := newServer(t, time.Second)
+	c := dial(t, srv)
+	io.WriteString(c, "POST /ul HTTP/1.1\r\nHost: t\r\nContent-Length: 100\r\n\r\n0123456789")
+	c.Conn.(*net.TCPConn).CloseWrite()
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	resp, err := http.ReadResponse(c.br, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
+	}
+}
+
 // Requests tagged with a test id are counted for that test (ADR-0002: the
 // server stores its own byte counts with the result).
 func TestTaggedBytesAreCounted(t *testing.T) {
@@ -235,7 +284,7 @@ func TestTaggedBytesAreCounted(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	id := testrun.NewID()
+	id := runs.New()
 	resp, err := http.Get(srv.URL + "/dl?bytes=300000&t=" + id)
 	if err != nil {
 		t.Fatal(err)

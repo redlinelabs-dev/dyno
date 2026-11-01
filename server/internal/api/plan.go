@@ -76,6 +76,7 @@ func NewPlan(version, testID string) Plan {
 	}
 	up := down
 	up.WarmupMs = 3_000
+	up.StartBytes = 256 << 10 // the upload count arrives only with each reply, so a slow uplink needs short first requests
 	up.MaxBytes = 32 << 20
 	return Plan{
 		TestID:    testID,
@@ -113,7 +114,7 @@ func (a *API) Register(mux *http.ServeMux) {
 }
 
 func (a *API) plan(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, NewPlan(a.Version, testrun.NewID()))
+	writeJSON(w, http.StatusOK, NewPlan(a.Version, a.Runs.New()))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

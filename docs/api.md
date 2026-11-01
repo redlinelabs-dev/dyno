@@ -15,14 +15,24 @@ arrives in a later milestone and will be added here.
 3. Each direction: open `streams` connections and send requests back to back
    for `duration_ms`. Start each stream at `start_bytes` per request and
    double the size until a request takes `target_request_ms`, never above
-   `max_bytes`. Drop samples from the first `warmup_ms`.
+   `max_bytes`. Upload instead sizes each request to take `target_request_ms`
+   at the rate the previous one reached, from 64 KiB to `max_bytes`: its
+   count only arrives with each reply, so long requests leave it stale.
+   Drop samples from the first `warmup_ms`. If any stream fails, the test
+   has failed: don't report or store a result.
 4. While a direction runs, ping every `latency.loaded_interval_ms` on a
    separate connection, never on a load stream.
 5. Upload speed comes from the server's `bytes`, not from client progress
-   events (ADR-0003). Divide each stream's bytes by its wall time, from opening
-   its first request to the last reply, and add the streams. Don't divide by
-   `elapsed_us`: it leaves out the gaps between requests and the body bytes
-   that arrive before the headers are read, so it reads high.
+   events, which count bytes the browser handed to its socket (ADR-0003). Treat
+   each request's `bytes` as spread evenly from opening it to its reply. The
+   count is complete up to the earliest of the streams' last replies; the
+   result is all streams' bytes from the end of warmup to that point, over that
+   one window. If the window is under a second, or a request in it lasted more
+   than half of it, use every byte over the span from the first request to the
+   last reply instead. Chart the same way: the rate over the
+   last second while spreading holds, else every confirmed byte over the time
+   since the first request. Don't add per-stream rates timed over different
+   windows, and don't divide by `elapsed_us`: both read high.
 6. Tag every `/dl` and `/ul` request with `?t=<test_id>` from the plan, then
    `POST` the result to `endpoints.results` with the same `test_id`. The
    server stores its own byte counts and the grade with it.
@@ -42,12 +52,14 @@ The web UI's choices within these rules are ADR-0010.
   "download": { "streams": 5, "duration_ms": 10000, "warmup_ms": 1500,
                 "start_bytes": 1048576, "max_bytes": 268435456, "target_request_ms": 1000 },
   "upload":   { "streams": 5, "duration_ms": 10000, "warmup_ms": 3000,
-                "start_bytes": 1048576, "max_bytes": 33554432, "target_request_ms": 1000 }
+                "start_bytes": 262144, "max_bytes": 33554432, "target_request_ms": 1000 }
 }
 ```
 
-Every call returns a fresh `test_id` (24 hex characters). The server keeps a
-test's byte counts for 10 minutes, and for at most 64 tests at a time.
+Every call returns a fresh `test_id` (24 hex characters). The server counts
+bytes only for ids it issued, for 10 minutes, and for at most 64 tests at a
+time; when all 64 are moving bytes, a new plan's bytes go uncounted rather
+than wiping a running test's.
 Upload requests stop at 32 MiB because a browser holds the whole body in
 memory.
 
@@ -74,8 +86,11 @@ Send any body up to 16 GiB. The server discards it and replies:
 the last body byte, so it is a per-request figure rather than a stream's rate
 (see step 5). The same figure is in `Server-Timing: recv;dur=<ms>`.
 `?t=<test_id>` adds the bytes received to that test's count. A
-body over 16 GiB gets `413`. A body that stops arriving for 10 s gets `408`
-and the connection is closed.
+body over 16 GiB gets `413`. A body that takes more than 10 s to deliver any
+64 KiB of itself gets `408` and the connection is closed. A body that ends
+before its `Content-Length` gets `400`: an aborted upload, never a short one.
+
+Errors from `/dl` and `/ul` are `{"error": "..."}` with the headers below.
 
 ### `GET /ping`
 
@@ -106,8 +121,9 @@ device's results. `detail` is any JSON value; the
 web UI sends its time series there (seconds from test start, `dir` 0 for
 download and 1 for upload), plus `spans`: each transfer's
 `[dir, start, counted, end]`, where `counted` is when warm-up ends. The
-server stores it as is. Bad input is
-`400` with `{"error": "..."}`.
+server stores it as is. `test_id` must be the plan's or empty. A result
+needs at least one speed or latency, and the body holds one JSON object and
+nothing after it. Bad input is `400` with `{"error": "..."}`.
 
 The reply is `201` with `Location: /api/v1/results/<id>` and the stored
 result: the fields above plus
@@ -118,7 +134,7 @@ result: the fields above plus
 | `source` | `client` for posted results; scheduled tests arrive in M3 |
 | `bufferbloat_ms` | Worse of the two loaded latencies minus idle |
 | `grade` | `A+` under 10 ms, `A` 20, `B` 50, `C` 100, `D` 500, else `F` (Cloudflare's thresholds); empty when there's no loaded latency |
-| `rpm` | Round trips per minute under load, 60000 / loaded latency |
+| `rpm` | Round trips per minute under load: 60000 / the worse loaded latency, rounded, at most 1,000,000 |
 | `server_bytes_down`, `server_bytes_up` | What the server itself sent and received for this `test_id`; 0 if unknown or expired |
 
 ### `GET /api/v1/results`
@@ -167,7 +183,7 @@ the database at start.
 | `go_memory_classes_total_bytes` | gauge | | All memory the Go runtime has mapped |
 | `go_memory_classes_heap_released_bytes` | gauge | | Heap memory the Go runtime has returned to the OS. Mapped minus released is what Go may have resident; the footprint soak uses it to tell Go's memory from SQLite's (ADR-0006) |
 
-Speeds are bits per second and latencies seconds, the Prometheus base units;
+Speeds are bytes per second and latencies seconds, the Prometheus base units;
 results store Mbit/s and ms, and the server converts.
 
 ## Headers on measurement responses

@@ -9,6 +9,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
 
 // Submission is what a client posts after running the plan.
@@ -43,6 +45,10 @@ type Result struct {
 
 const maxClientLen = 80
 
+// maxRPM caps round trips per minute: 0.06 ms of loaded latency. A smaller
+// latency would overflow the int.
+const maxRPM = 1_000_000
+
 // MaxDeviceLen caps a device id. Ids are letters, digits, "-" and "_", which
 // keeps them safe in a query string without escaping.
 const MaxDeviceLen = 64
@@ -70,6 +76,12 @@ func (s *Submission) Validate() error {
 	if s.Streams < 0 || s.Streams > 64 {
 		return errors.New("streams out of range")
 	}
+	if s.TestID != "" && !testrun.ValidID(s.TestID) {
+		return errors.New("test_id must be the plan's 24 hex characters, or empty")
+	}
+	if s.DownloadMbps == 0 && s.UploadMbps == 0 && s.IdleMs == 0 && s.LoadedDownMs == 0 && s.LoadedUpMs == 0 {
+		return errors.New("a result needs at least one measurement")
+	}
 	if !ValidDevice(s.Device) {
 		return errors.New("device must be up to 64 letters, digits, - or _")
 	}
@@ -87,7 +99,7 @@ func (r *Result) Derive() {
 	}
 	r.BufferbloatMs = round1(max(0, busy-r.IdleMs))
 	r.Grade = Grade(r.BufferbloatMs)
-	r.RPM = int(math.Round(60_000 / busy))
+	r.RPM = int(math.Min(math.Round(60_000/busy), maxRPM))
 }
 
 // Grade grades the latency added under load on Cloudflare's published

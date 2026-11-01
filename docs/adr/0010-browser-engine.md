@@ -14,20 +14,46 @@ the next session would otherwise re-argue these.
   `min(warmup_ms, 0.4 × duration)`, so Quick still has a steady-state window.
 - **Streams:** Auto uses the plan's count. A user choice is capped at it.
 - **Download** is counted in the browser from `fetch` body chunks into 100 ms
-  buckets. The result is the rate over the whole buckets after warmup. The
-  live gauge shows the last 0.5 s.
+  buckets. The result is the rate over the whole buckets after warmup, empty
+  ones included: amended 2026-11-01, when buckets after the last byte were
+  dropped, so a stall at the end read as the speed before it (93 Mbps
+  reported against 42.5 delivered). The live gauge shows the last 0.5 s.
 - **Upload** is sent with XHR and a `Blob` body, sliced from one random 1 MiB
-  block repeated up to the plan's 32 MiB cap. Progress events only drive the
-  gauge. The result comes from the server's replies: each stream's bytes,
-  for requests that started after warmup, over the stream's wall time from
-  opening the first of them to the reply to the last, summed over streams.
-  Amended 2026-10-31: the first version divided by the server's `elapsed_us`,
-  which skips the gaps between requests and the bytes buffered before the
-  headers are read. On a gigabit link it reported 1,234 Mbps from 1.69 GB in
-  15 s, above both the line rate and the chart's peak. A stream with no
-  finished request after warmup falls back to its warmup requests. If no
-  request finished at all, the browser's count is used and the result's
-  detail says `upload_from_client`.
+  block repeated up to the plan's 32 MiB cap. Everything shown or stored
+  comes from the server's replies, with each request's bytes taken as spread
+  evenly from opening it to its reply. The count is complete up to the
+  earliest of the streams' last replies. The result is all streams' bytes from
+  the end of warmup to that point, over that one window. If the window is
+  under a second, or a request in it lasted over half of it, the result is
+  every byte over the whole span instead, which reads low, not high. Even
+  when spreading holds, streams whose shares shift within a request can move
+  a few percent of bytes across a window edge, either way. The chart follows
+  the result's choice: the last second of the server's count when the result
+  spreads bytes, otherwise every byte confirmed so far over the time since the
+  first request, so it never shows more than the result's method allows. Its
+  Peak counts only samples after warmup. The live gauge shows the last second
+  of the count and trails real time by about a request. Each request is sized to take `target_request_ms` at the
+  previous one's rate (64 KiB to 32 MiB), starting from the plan's 256 KiB.
+  If no request finished at all, the browser's progress count is used and the
+  result's detail says `upload_from_client`.
+
+  Amended twice. 2026-10-31: the first version divided by the server's
+  `elapsed_us`, which skips the gaps between requests and the bytes buffered
+  before the headers are read; on a gigabit link it reported 1,234 Mbps from
+  1.69 GB in 15 s. 2026-11-01: the second added per-stream rates timed over
+  different windows and fell back to warmup requests when 1 MiB requests
+  outlasted the window, reading 22.5 to 27.7 on a 20 Mbit/s uplink and 6.1 on
+  5. Its chart and gauge used XHR progress events, which count bytes handed to
+  the socket, not sent, and peaked at 3,355 on a 500 Mbit/s link. Through a
+  shaping proxy the current method reads 19.8 and 20.0 on 20, 4.9 on 5 and
+  499.7 on 500 (Standard), and 2 to 8% low on Quick, never above the link.
+- **A failed stream fails the test.** If any load stream errors (the server
+  went away, a proxy answered 502, the server timed out a stalled upload), the
+  direction stops and the page shows which part lost the server. No result is
+  shown, graded or stored. Amended 2026-11-01: failed streams were ignored,
+  so a server killed mid-test still produced an A+ result. A hung latency
+  probe no longer holds the error back: probes stop with the load streams, and
+  idle-latency probes give up after 10 s.
 - **Latency probes** use Resource Timing's `responseStart − requestStart`,
   which leaves out the worker's own scheduling delay. They fall back to wall
   time when the browser zeroes those fields. Loaded probes run every
