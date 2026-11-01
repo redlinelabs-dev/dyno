@@ -30,6 +30,7 @@ behind progressive disclosure. Private repo, solo developer.
 | `server/` | Go server: test endpoints, JSON API, scheduler, SQLite, embedded web assets. One static binary. |
 | `web/` | TypeScript UI, no framework, bundled by Bun into static files the server embeds. |
 | `bench/` | Reproducible runtime benchmark (`bench/README.md`). Also the base for footprint regression checks. |
+| `install/` | `install.sh` (systemd service on Debian/Ubuntu) and `proxmox-lxc.sh` (container on a Proxmox host), POSIX sh (ADR-0024). |
 | `prototypes/` | Standalone HTML prototypes. Reference only, never imported. |
 
 `web/` builds into `server/internal/webui/dist/`, which is gitignored, so
@@ -68,13 +69,15 @@ ADR-0007.
 ## Tooling
 
 TypeScript scripts run directly with Bun (`bun scripts/x.ts`), using Bun's own
-APIs. Python is not used here. Go is the server language. Build and test
-from the root `Makefile` (it finds Go in `~/.local/go` itself):
+APIs. The installers in `install/` are the exception: POSIX sh, because a
+fresh host has no Bun (ADR-0024). Python is not used here. Go is the server
+language. Build and test from the root `Makefile` (it finds Go in `~/.local/go` itself):
 
 | Command | What |
 |---|---|
 | `make web` | Web UI into `server/internal/webui/dist/` (the other targets run it first) |
 | `make build` | Static server binary at `bin/dyno`, web UI embedded |
+| `make release` | Both static binaries, the install scripts and `SHA256SUMS` in `dist/` (ADR-0024) |
 | `make check` | gofmt, go vet, `go test -race`, web typecheck and `bun test`, quick footprint check (~2 min). Run before every commit. |
 | `make bench` | Full footprint check with the 12-minute soak (~15 min); records to `bench/results/dyno-footprint.jsonl` |
 | `make image` / `make image-multiarch` | Container image; needs Docker, so not on this machine |

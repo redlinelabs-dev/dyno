@@ -7,7 +7,7 @@ IMAGE   ?= dyno:dev
 
 export CGO_ENABLED = 0
 
-.PHONY: web build loadgen check fmt vet test webcheck footprint bench image image-multiarch clean
+.PHONY: web build release loadgen check fmt vet test webcheck footprint bench image image-multiarch clean
 
 ## web: the web UI, built by Bun into the folder the server embeds
 web: web/node_modules
@@ -20,6 +20,16 @@ web/node_modules: web/package.json
 ## build: the static server binary at bin/dyno, web UI included
 build: web
 	cd server && $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o ../bin/dyno .
+
+## release: static binaries for linux/amd64 and linux/arm64, the install scripts
+## and SHA256SUMS in dist/, the files a GitHub release carries (ADR-0024)
+release: web
+	rm -rf dist && mkdir -p dist
+	for arch in amd64 arm64; do \
+		(cd server && GOOS=linux GOARCH=$$arch $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o ../dist/dyno-linux-$$arch .) || exit 1; \
+	done
+	cp install/install.sh install/proxmox-lxc.sh dist/
+	cd dist && sha256sum dyno-linux-amd64 dyno-linux-arm64 install.sh proxmox-lxc.sh > SHA256SUMS
 
 ## loadgen: the bench load generator the footprint check drives
 loadgen:
@@ -57,4 +67,4 @@ image-multiarch:
 	docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=$(VERSION) -t $(IMAGE) .
 
 clean:
-	rm -rf bin server/internal/webui/dist
+	rm -rf bin dist server/internal/webui/dist

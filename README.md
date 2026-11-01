@@ -12,20 +12,21 @@ and monitoring come in M3. See `docs/ROADMAP.md`.
 
 ## Running it
 
-```sh
-docker compose up -d     # then open http://<this-host>:3966
-```
+| Where | Command | Guide |
+|---|---|---|
+| Docker | `docker compose up -d` with [`compose.yaml`](compose.yaml) | [docs/install/docker.md](docs/install/docker.md) |
+| Debian, Ubuntu, Raspberry Pi | `curl -fsSLO https://github.com/redlinelabs-dev/dyno/releases/latest/download/install.sh && sudo sh install.sh` | [docs/install/debian.md](docs/install/debian.md) |
+| Proxmox VE (new LXC container) | `curl -fsSLO https://github.com/redlinelabs-dev/dyno/releases/latest/download/proxmox-lxc.sh && sh proxmox-lxc.sh` on the host | [docs/install/proxmox-lxc.md](docs/install/proxmox-lxc.md) |
 
-Or without Docker: `make build && bin/dyno` (needs Go and Bun). The API is in
-`docs/api.md`. Test history is a SQLite file in the `dyno-data` volume, or
-`./data` without Docker.
+Then open `http://<this-host>:3966` and press start. Each guide covers
+settings, upgrades, uninstalling and where the test history lives.
+
+From source: `make build && bin/dyno` (needs Go and Bun). The API is in
+`docs/api.md`.
 
 There is no login (ADR-0008). Anyone who can reach dyno can run tests and
 read the history, so keep it on your LAN or put it behind a VPN or a reverse
 proxy that does auth.
-
-The compose file uses host networking. On Docker Desktop (macOS, Windows),
-turn on host networking in Settings, Resources, Network first (4.34 or later).
 
 ## Where things are
 

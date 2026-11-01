@@ -1,7 +1,8 @@
 # dyno: run `docker compose up -d`, then open http://<this-host>:3966
+# Upgrade: docker compose pull && docker compose up -d
 services:
   dyno:
-    build: .                # M4 swaps this for the published image
+    image: ghcr.io/redlinelabs-dev/dyno:latest   # or pin a version, e.g. :0.1
     network_mode: host      # no NAT or userland proxy in the measured path (ADR-0003)
     restart: unless-stopped
     volumes:

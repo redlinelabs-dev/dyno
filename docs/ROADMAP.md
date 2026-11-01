@@ -85,7 +85,7 @@ MySpeed all ship it [~37].
 Done when `make check` passes with every footprint budget met, and the NAS
 Prometheus scrapes this box's dyno and a Grafana panel shows its tests.
 
-## M2.6. Install it (Docker and Proxmox LXC)
+## M2.6. Install it (Docker and Proxmox LXC; scripts, CI and docs built 2026-10-31, not yet run on circuit or GitHub)
 
 Needs: nothing open. Rules: brief check #8, ADR-0021 (public once this works).
 
