@@ -90,6 +90,24 @@ growing by 4 to 8 KiB per 2,000. The soak stores 360 results, so it measured
 only the fill. The footprint check now stores 8,000 results before the soak
 starts and measures the filled state a server reaches in its first weeks.
 
+Amended 2026-11-01: the soak's server runs with transparent huge pages off
+(`prctl(PR_SET_THP_DISABLE)`, set by the footprint script and inherited). Three
+soaks in a row failed the outside-Go slope (82, 27 and 190 KiB/min, the last
+on the code that had passed), each with one jump of 0.5 to 1.5 MiB that then
+held or eased. This box runs THP `always` with khugepaged's `max_ptes_none` at
+511, so the kernel merges a 2 MiB stretch into one huge page even when only
+one of its 512 pages is in use, and RSS rises with no allocation behind it. A
+probe that diffed `/proc/pid/smaps` at each jump found it in two places: Go's
+heap, exactly 2,048 KiB, after Go had returned the pages; and the mappings of
+SQLite's allocator, 1.5 MiB in one holding 2 MiB of huge pages. Go's counters
+didn't move either time, so the check called it growth outside Go. The WAL
+stayed at 4 MiB throughout. `GODEBUG=disablethp=1` covers only Go's heap: of
+five soaks with it, two still jumped, and the one the probe caught was in
+SQLite's memory. With THP off for the whole process, three soaks held zero
+huge pages and no jump, and memory outside Go settled within its first three
+minutes. The earlier checks keep THP, as a real install has it; the Go GC
+guide's advice for such hosts is `max_ptes_none` 0.
+
 ## Consequences
 
 - **Latency on a CPU-bound server reads high.** With every server core busy,

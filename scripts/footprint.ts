@@ -13,6 +13,7 @@
 // it rather than guess from a short run.
 
 import { $ } from "bun";
+import { dlopen, FFIType } from "bun:ffi";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 
@@ -262,11 +263,27 @@ const info = (check: string, value: string) => report.push({ check, value, budge
 // stored results, then grows a few bytes per result. The soak stores only 360,
 // so the database is filled first and the soak measures the state a server
 // reaches after its first weeks, not the fill.
+//
+// The soak's server runs without transparent huge pages. With THP "always",
+// khugepaged merges 2 MiB stretches of memory into huge pages even when most
+// of each stretch is free: in Go's heap after Go has returned the pages, and in
+// SQLite's allocator. RSS then jumps by up to 2 MiB at a random minute while
+// Go's counters don't move, which read as 27 to 190 KiB/min of growth outside
+// Go (ADR-0006). PR_SET_THP_DISABLE is inherited by every process this script
+// starts from here on, and the soak is the last server it starts. The earlier
+// checks keep THP, as a real install has it.
+function disableTHP() {
+  const libc = dlopen("libc.so.6", { prctl: { args: [FFIType.i32, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64], returns: FFIType.i32 } });
+  if (libc.symbols.prctl(41 /* PR_SET_THP_DISABLE */, 1, 0, 0, 0) !== 0) throw new Error("prctl(PR_SET_THP_DISABLE) failed");
+  libc.close();
+}
 const SEED_RESULTS = 8000;
 const SEED_BODY = `{"test_id":"","client":"footprint","device":"footprint-seed","download_mbps":938.2,"upload_mbps":412.6,"idle_ms":8.4,"loaded_down_ms":21,"loaded_up_ms":39.5,"jitter_ms":0.8,"streams":5,"client_limited":false}`;
 if (FULL) {
+  disableTHP();
   const proc = await start();
   try {
+    if (!/^THP_enabled:\s+0$/m.test(readFileSync(`/proc/${proc.pid}/status`, "utf8"))) throw new Error("the soak's server still has THP enabled");
     log(`soak: storing ${SEED_RESULTS} results first`);
     for (let i = 0; i < SEED_RESULTS; i++) {
       const r = await fetch(`http://${ADDR}/api/v1/results`, { method: "POST", body: SEED_BODY, headers: { "content-type": "application/json" } });
