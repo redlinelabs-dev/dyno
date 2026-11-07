@@ -35,7 +35,21 @@ DYNO_CTID=120 DYNO_IP=192.168.1.50/24 DYNO_GW=192.168.1.1 sh proxmox-lxc.sh
 ```
 
 `DYNO_LISTEN` and `DYNO_METRICS_LISTEN` are passed to the installer; see
-[`debian.md`](debian.md#settings).
+[`debian.md`](debian.md#settings). The script checks them before it creates the
+container.
+
+## Your own binary
+
+`DYNO_BINARY` installs a dyno binary from the host instead of downloading one,
+for a build of your own:
+
+```sh
+DYNO_BINARY=/root/dyno sh proxmox-lxc.sh
+```
+
+The script doesn't check that binary. An `install.sh` in the same folder as
+`proxmox-lxc.sh` is used as is. Without one there, `install.sh` is downloaded
+and checked against `SHA256SUMS`.
 
 ## With Tailscale
 
@@ -43,9 +57,17 @@ DYNO_CTID=120 DYNO_IP=192.168.1.50/24 DYNO_GW=192.168.1.1 sh proxmox-lxc.sh
 DYNO_TAILSCALE=1 sh proxmox-lxc.sh
 ```
 
-This gives the container `/dev/net/tun`, installs Tailscale in it, and prints
-the `tailscale up` command that joins your tailnet. Set `TS_AUTHKEY` to an
-auth key to join without the login link.
+This gives the container `/dev/net/tun`, then runs this inside it:
+
+1. `apt-get install curl ca-certificates`.
+2. Tailscale's own install script from `https://tailscale.com/install.sh`. It
+   adds Tailscale's apt repository, and dyno doesn't checksum it.
+3. `tailscale up`, if you set `TS_AUTHKEY` to an auth key. Without one, the
+   script prints the `tailscale up` command for you to run, and you join your
+   tailnet with the login link.
+
+The key goes into the container through a file that is deleted afterwards,
+never on a command line.
 
 ## Upgrade
 
@@ -57,6 +79,32 @@ DYNO_CTID=120 sh proxmox-lxc.sh --upgrade
 
 Settings and history stay. Inside the container, `install.sh` works too,
 as on any Debian machine.
+
+`--upgrade` only works on a container tagged `dyno`, which the script puts on
+every container it creates, so a mistyped id can't install dyno into another
+container. If it refuses a container that is dyno's, the tag was removed: add
+`dyno` back to the container's tags in the Proxmox web UI.
+
+## If it fails
+
+If the script stops before it creates the container, it has changed nothing on
+the host except, at most, a downloaded template. Fix the cause and run it
+again.
+
+If it fails after it creates the container, the script ends by printing this
+(here for container 120):
+
+```
+dyno: container 120 was created and is still there; remove it with: pct stop 120; pct destroy 120
+```
+
+To look inside, run `pct enter 120`. To retry after fixing the cause, start the
+container (`pct start 120`) and run `DYNO_CTID=120 sh proxmox-lxc.sh --upgrade`.
+To start over, remove it with the two commands in that message.
+
+`--upgrade` installs dyno only, not Tailscale. If a Tailscale step failed, dyno
+is already running: finish the steps under "With Tailscale" inside the
+container, or start over.
 
 ## Where things are
 

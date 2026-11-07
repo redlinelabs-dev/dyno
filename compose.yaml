@@ -13,3 +13,4 @@ services:
 
 volumes:
   dyno-data:
+    name: dyno-data         # not <folder>_dyno-data, so `docker run -v dyno-data:/data` sees it too

@@ -1,6 +1,6 @@
 # Checks every pull request and every push to main: the same `make check` a
-# commit needs locally, the install scripts, and the container image the
-# shipped compose.yaml runs (brief check #1).
+# commit needs locally, the install scripts, the container image the shipped
+# compose.yaml runs (brief check #1), and install.sh on a real systemd host.
 name: ci
 
 on:
@@ -64,3 +64,110 @@ jobs:
           docker compose ps
           docker stats --no-stream
           docker compose down
+      # The next two steps run commands taken from docs/install/docker.md, so
+      # the page and the test can't drift apart.
+      - name: back up as docker.md says
+        run: |
+          cd /tmp/fresh
+          docker compose up -d --wait --wait-timeout 60
+          curl -fsS -o /dev/null -H 'Content-Type: application/json' \
+            -d '{"client":"ci-backup-check","download_mbps":100}' http://127.0.0.1:3966/api/v1/results
+          docker compose stop
+          cmd=$(grep '^docker run --rm' "$GITHUB_WORKSPACE/docs/install/docker.md")
+          echo "$cmd"
+          mkdir /tmp/backup && cd /tmp/backup
+          sh -c "$cmd"
+          ls -l
+          test -s dyno.db
+          # The result posted above is in the copy, not only the empty schema.
+          grep -aq ci-backup-check dyno.db*
+          cd /tmp/fresh
+          docker compose down -v
+      - name: docker run one-liner from docker.md
+        run: |
+          cmd=$(grep '^docker run -d' docs/install/docker.md)
+          echo "$cmd"
+          sh -c "$cmd"
+          i=0
+          until [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3966/ping)" = 204 ]; do
+            i=$((i + 1))
+            [ "$i" -lt 30 ] || { docker logs dyno; exit 1; }
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3966/api/v1/plan
+          docker rm -f dyno
+          docker volume rm dyno-data
+
+  # make check runs install.sh against a stand-in systemctl. Here it runs on a
+  # real systemd, where the unit's sandboxing (DynamicUser, no capabilities)
+  # takes effect.
+  systemd:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: |
+            server/go.sum
+            bench/loadgen/go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+      - run: make build
+      - name: install.sh starts a non-root service
+        run: |
+          sudo DYNO_BINARY="$PWD/bin/dyno" sh install/install.sh
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3966/ping)" = 204
+          curl -fsS http://127.0.0.1:3966/api/v1/plan
+          pid=$(systemctl show -p MainPID --value dyno)
+          user=$(ps -o user= -p "$pid")
+          echo "dyno runs as $user (pid $pid)"
+          test -n "$user"
+          test "$user" != root
+          # sudo for every file test here: /var/lib/private is root-only, and
+          # a plain test calls a file it can't reach missing.
+          sudo test -f /var/lib/dyno/dyno.db
+      - name: install.sh again reinstalls and keeps settings
+        run: |
+          sudo cp /etc/dyno/dyno.env "$RUNNER_TEMP/dyno.env"
+          out=$(sudo DYNO_BINARY="$PWD/bin/dyno" sh install/install.sh)
+          echo "$out"
+          echo "$out" | grep -q reinstalled
+          sudo cmp /etc/dyno/dyno.env "$RUNNER_TEMP/dyno.env"
+      # The recipe in docs/install/debian.md, with the drop-in written as a
+      # file because systemctl edit opens an editor.
+      - name: port 80 with the drop-in from debian.md
+        run: |
+          sudo mkdir -p /etc/systemd/system/dyno.service.d
+          sudo tee /etc/systemd/system/dyno.service.d/override.conf >/dev/null <<'EOF'
+          [Service]
+          AmbientCapabilities=CAP_NET_BIND_SERVICE
+          CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+          EOF
+          sudo systemctl daemon-reload
+          echo 'DYNO_LISTEN=:80' | sudo tee -a /etc/dyno/dyno.env >/dev/null
+          sudo systemctl restart dyno
+          i=0
+          until [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:80/ping)" = 204 ]; do
+            i=$((i + 1))
+            [ "$i" -lt 15 ] || { sudo journalctl -u dyno --no-pager -n 20; exit 1; }
+            sleep 1
+          done
+      - name: uninstall keeps history and settings
+        run: |
+          sudo sh install/install.sh --uninstall
+          sudo test ! -e /etc/systemd/system/dyno.service
+          test "$(systemctl is-active dyno)" != active
+          sudo test -f /etc/dyno/dyno.env
+          sudo test -f /var/lib/private/dyno/dyno.db
+          sudo test -d /etc/systemd/system/dyno.service.d
+      - name: purge removes everything
+        run: |
+          sudo sh install/install.sh --purge
+          for p in /usr/local/bin/dyno /etc/dyno /var/lib/private/dyno /etc/systemd/system/dyno.service.d; do
+            sudo test ! -e "$p" || { echo "$p is still there"; exit 1; }
+          done
+      - name: service log
+        if: failure()
+        run: sudo journalctl -u dyno --no-pager -n 50

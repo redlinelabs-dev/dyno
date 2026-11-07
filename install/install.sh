@@ -17,6 +17,9 @@
 # fresh host won't have Bun (ADR-0024).
 
 set -eu
+# The service runs as a throwaway user, so whatever umask root has, the binary
+# has to stay runnable by others and nothing should come out writable by them.
+umask 022
 
 REPO=redlinelabs-dev/dyno
 VERSION=${DYNO_VERSION:-latest}
@@ -33,6 +36,44 @@ CONF=$CONF_DIR/dyno.env
 
 say() { printf 'dyno: %s\n' "$*"; }
 die() { printf 'dyno: %s\n' "$*" >&2; exit 1; }
+
+# listen_ok VALUE succeeds for :PORT, HOST:PORT and [IPV6]:PORT with a port from
+# 1 to 65535, the forms dyno can bind. A host is letters, digits, . and -; an
+# IPv6 address is hex digits, : and . inside one pair of brackets.
+listen_ok() {
+	case $1 in
+	\[*\]:*)
+		host=${1%\]:*}; host=${host#\[}; port=${1##*\]:}
+		case $host in "" | *[!0-9A-Fa-f:.]*) return 1 ;; esac ;;
+	*:*)
+		host=${1%:*}; port=${1##*:}
+		case $host in *[!A-Za-z0-9.-]*) return 1 ;; esac ;;
+	*) return 1 ;;
+	esac
+	# Six digits or more is too big, and keeps [ from seeing a number it can't hold.
+	case $port in "" | *[!0-9]* | ??????*) return 1 ;; esac
+	[ "$port" -ge 1 ] && [ "$port" -le 65535 ]
+}
+
+# check_listen NAME VALUE passes an empty value (not set) or one listen_ok accepts.
+# The value goes into dyno.env, which systemd reads line by line, so nothing else
+# may get in, and dyno refuses anything else at startup.
+check_listen() {
+	[ -z "$2" ] || listen_ok "$2" || die "$1 must be a port or a host and port, like :8080 or 127.0.0.1:3967"
+}
+
+# link_host prints the host to open from the addresses in $1 (hostname -I): the
+# first IPv4 one, else the first IPv6 one in brackets, which a :port needs.
+link_host() {
+	v6=
+	for a in $1; do
+		case $a in
+		*:*) [ -n "$v6" ] || v6="[$a]" ;;
+		*) echo "$a"; return ;;
+		esac
+	done
+	echo "$v6"
+}
 
 usage() {
 	sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
@@ -57,9 +98,9 @@ arch() {
 
 fetch() { # url file
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL --retry 3 -o "$2" "$1"
+		curl -fsSL --retry 3 --connect-timeout 20 --max-time 600 -o "$2" "$1"
 	elif command -v wget >/dev/null 2>&1; then
-		wget -q -O "$2" "$1"
+		wget -q -T 30 -t 3 -O "$2" "$1"
 	else
 		die "needs curl or wget: apt-get install -y curl"
 	fi || die "download failed: $1"
@@ -146,6 +187,9 @@ EOF
 write_conf() {
 	if [ -f "$CONF" ]; then
 		say "keeping your settings in /etc/dyno/dyno.env"
+		if [ -n "${DYNO_LISTEN:-}${DYNO_METRICS_LISTEN:-}" ]; then
+			say "DYNO_LISTEN and DYNO_METRICS_LISTEN apply only on the first install; to change them, edit /etc/dyno/dyno.env and run: systemctl restart dyno"
+		fi
 		return
 	fi
 	mkdir -p "$CONF_DIR"
@@ -158,26 +202,33 @@ write_conf() {
 	} >"$CONF"
 }
 
-# listen_addr prints DYNO_LISTEN as the service will see it.
+# listen_addr prints DYNO_LISTEN as the service will see it. It reads dyno.env
+# as text, the way systemd does (blanks around the = included): sourcing it
+# would run whatever the file holds, as root.
 listen_addr() {
-	(
-		DYNO_LISTEN=
-		# shellcheck disable=SC1090
-		set -a && . "$CONF" && set +a
-		echo "${DYNO_LISTEN:-:3966}"
-	)
+	addr=$(sed -n 's/^[[:space:]]*DYNO_LISTEN[[:space:]]*=[[:space:]]*//p' "$CONF" | tail -n 1 | sed 's/[[:space:]]*$//')
+	case $addr in
+	\"*\" | \'*\') addr=${addr#?}; addr=${addr%?} ;;
+	esac
+	echo "${addr:-:3966}"
 }
 
 install_dyno() {
+	check_listen DYNO_LISTEN "${DYNO_LISTEN:-}"
+	check_listen DYNO_METRICS_LISTEN "${DYNO_METRICS_LISTEN:-}"
 	TMP=$(mktemp -d)
-	trap 'rm -rf "$TMP"' EXIT
+	# Whichever way the run ends, no temp folder and no half-written dyno.new stay.
+	trap 'rm -rf "$TMP"; rm -f "$BIN.new"' EXIT
+	trap 'exit 1' INT TERM HUP # dash skips the EXIT trap when a signal kills it
 	get_binary
-	chmod 0755 "$TMP/dyno"
-	version=$("$TMP/dyno" -version 2>/dev/null) || die "the binary doesn't run on this machine"
+	mkdir -p "$(dirname "$BIN")"
+	# The new binary is staged and tried in the install folder: a hardened host
+	# mounts /tmp noexec, and the final mv then stays on one filesystem.
+	cp "$TMP/dyno" "$BIN.new" && chmod 0755 "$BIN.new" || die "couldn't write $BIN.new; nothing was changed"
+	version=$("$BIN.new" -version 2>/dev/null) || die "the binary doesn't run on this machine"
 	old=
 	[ -f "$BIN" ] && old=$("$BIN" -version 2>/dev/null || echo "an unknown version")
-	mkdir -p "$(dirname "$BIN")"
-	cp "$TMP/dyno" "$BIN.new" && mv -f "$BIN.new" "$BIN"
+	mv -f "$BIN.new" "$BIN" || die "couldn't replace $BIN; nothing was changed"
 	write_unit
 	write_conf
 	$SYSTEMCTL daemon-reload
@@ -201,7 +252,10 @@ install_dyno() {
 		done
 	fi
 	port=${listen##*:}
-	host=$(hostname -I 2>/dev/null | cut -d' ' -f1)
+	host=${listen%:*}
+	case $host in
+	"" | 0.0.0.0 | :: | "[::]") host=$(link_host "$(hostname -I 2>/dev/null)") ;; # every address: use this host's own
+	esac
 	say "running. Open http://${host:-<this-host>}:$port"
 	say "settings: /etc/dyno/dyno.env   data: /var/lib/dyno   logs: journalctl -u dyno"
 }
@@ -214,8 +268,9 @@ uninstall_dyno() {
 	fi
 	rm -f "$BIN"
 	if [ "$1" = purge ]; then
-		# DynamicUser keeps the real directory under /var/lib/private.
-		rm -rf "$ROOT/var/lib/private/dyno" "$ROOT/var/lib/dyno" "$CONF_DIR"
+		# DynamicUser keeps the real directory under /var/lib/private, and
+		# systemctl edit keeps its overrides in dyno.service.d.
+		rm -rf "$ROOT/var/lib/private/dyno" "$ROOT/var/lib/dyno" "$CONF_DIR" "$UNIT.d"
 		say "removed dyno, its test history and its settings"
 	else
 		say "removed dyno; kept its test history (/var/lib/dyno) and settings (/etc/dyno)"

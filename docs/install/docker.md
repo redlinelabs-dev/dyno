@@ -57,11 +57,24 @@ Pin a version instead of `latest` with a tag like `:0.1` (newest 0.1.x) or
 ## Where the data lives
 
 Test history is one SQLite file, `/data/dyno.db`, in the `dyno-data` volume.
-Back it up with:
+Compose and the `docker run` command above share that volume.
+
+To back it up, stop dyno, copy the files out, and start it again. While dyno
+runs, its newest results can sit in side files next to `dyno.db`, so a copy of
+a running server can miss them. Stopping dyno writes them into the database.
 
 ```sh
-docker run --rm -v dyno-data:/data -v "$PWD":/backup busybox cp /data/dyno.db /backup/
+docker compose stop        # or: docker stop dyno
+docker run --rm -v dyno-data:/data -v "$PWD":/backup busybox sh -c 'cp /data/dyno.db* /backup/'
+docker compose start       # or: docker start dyno
 ```
+
+The `*` also takes the `dyno.db-wal` and `dyno.db-shm` files that dyno leaves
+behind if it is killed instead of stopped.
+
+dyno runs as user 65532, and `/data` in the image belongs to that user, which
+is why the volume works as it is. A folder on the host doesn't: before you
+mount one (`-v /srv/dyno:/data`), run `sudo chown 65532:65532 /srv/dyno`.
 
 ## Uninstall
 

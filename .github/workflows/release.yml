@@ -1,6 +1,8 @@
 # Publishes a release when a version tag (v0.1.0) is pushed: static binaries,
 # the install scripts and SHA256SUMS on the GitHub release, and the multi-arch
-# image on GHCR (ADR-0024).
+# image on GHCR (ADR-0024). A tag with a hyphen (v0.2.0-rc.1) makes a GitHub
+# prerelease, so the releases/latest/download/ URLs in the docs keep serving
+# the last stable release, and it leaves the image's latest tag alone.
 name: release
 
 on:
@@ -12,6 +14,10 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      # The tag name reaches the shell through the environment, never spliced
+      # into the script text.
+      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -21,11 +27,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4"
-      - run: make release VERSION=${{ github.ref_name }}
+      - run: make release VERSION="$TAG"
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --verify-tag --generate-notes
+        run: |
+          # A hyphen in the tag makes this a prerelease, which "latest" skips.
+          case $TAG in *-*) set -- --prerelease ;; esac
+          gh release create "$TAG" dist/* --verify-tag --generate-notes "$@"
 
   image:
     runs-on: ubuntu-24.04
@@ -44,10 +53,12 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/redlinelabs-dev/dyno
+          # The only latest is the raw tag below, which skips prereleases.
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
       - uses: docker/build-push-action@v7
         with:
           context: .

@@ -78,7 +78,7 @@ language. Build and test from the root `Makefile` (it finds Go in `~/.local/go` 
 | `make web` | Web UI into `server/internal/webui/dist/` (the other targets run it first) |
 | `make build` | Static server binary at `bin/dyno`, web UI embedded |
 | `make release` | Both static binaries, the install scripts and `SHA256SUMS` in `dist/` (ADR-0024) |
-| `make check` | gofmt, go vet, `go test -race`, web typecheck and `bun test`, quick footprint check (~2 min). Run before every commit. |
+| `make check` | gofmt, go vet, `go test -race`, web typecheck and `bun test`, installer tests (`make installcheck`: `dash -n` and `bun test install/`), quick footprint check (~2 min). Run before every commit. |
 | `make bench` | Full footprint check with the 12-minute soak (~15 min); records to `bench/results/dyno-footprint.jsonl` |
 | `make image` / `make image-multiarch` | Container image; needs Docker, so not on this machine |
 

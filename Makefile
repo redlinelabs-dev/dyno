@@ -7,7 +7,7 @@ IMAGE   ?= dyno:dev
 
 export CGO_ENABLED = 0
 
-.PHONY: web build release loadgen check fmt vet test webcheck footprint bench image image-multiarch clean
+.PHONY: web build release loadgen check fmt vet test webcheck installcheck footprint bench image image-multiarch clean
 
 ## web: the web UI, built by Bun into the folder the server embeds
 web: web/node_modules
@@ -35,8 +35,8 @@ release: web
 loadgen:
 	cd bench/loadgen && $(GO) build -trimpath -o ../../bin/loadgen .
 
-## check: formatting, vet, race tests, web typecheck and tests, quick footprint check (~2 min)
-check: fmt vet test webcheck footprint
+## check: formatting, vet, race tests, web typecheck and tests, installer tests, quick footprint check (~2 min)
+check: fmt vet test webcheck installcheck footprint
 
 fmt:
 	@out=$$($(GOFMT) -l server bench/loadgen); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -50,6 +50,11 @@ test: web
 
 webcheck: web/node_modules
 	cd web && bunx tsc --noEmit && bun test
+
+# The install scripts run under stand-in systemctl and Proxmox tools (ADR-0024).
+installcheck:
+	for f in install/*.sh; do dash -n "$$f" || exit 1; done
+	bun test install/
 
 footprint: build loadgen
 	bun scripts/footprint.ts
