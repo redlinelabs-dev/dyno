@@ -16,8 +16,8 @@ import (
 	"github.com/redlinelabs-dev/dyno/server/internal/result"
 )
 
-// ErrNotFound is returned by Get for an id that doesn't exist.
-var ErrNotFound = errors.New("result not found")
+// ErrNotFound is returned for a result or schedule id that doesn't exist.
+var ErrNotFound = errors.New("not found")
 
 type Store struct {
 	db *sql.DB
@@ -76,6 +76,28 @@ var migrations = []string{
 	// Results from before it have none.
 	`ALTER TABLE results ADD COLUMN device TEXT NOT NULL DEFAULT '';
 	CREATE INDEX results_device ON results(device, id);`,
+	// 3: scheduled tests (ADR-0028, ADR-0029). AUTOINCREMENT, so a deleted
+	// schedule's id, which its results keep, never names a new schedule.
+	`CREATE TABLE schedules (
+		id             INTEGER PRIMARY KEY AUTOINCREMENT,
+		name           TEXT NOT NULL,
+		far_end        TEXT NOT NULL,
+		kind           TEXT NOT NULL,
+		every_minutes  INTEGER NOT NULL,
+		offset_minutes INTEGER NOT NULL,
+		paused         INTEGER NOT NULL,
+		created_at     INTEGER NOT NULL, -- unix milliseconds, UTC
+		updated_at     INTEGER NOT NULL
+	);
+	ALTER TABLE results ADD COLUMN schedule_id INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE results ADD COLUMN far_end TEXT NOT NULL DEFAULT '';
+	ALTER TABLE results ADD COLUMN path_changed INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE results ADD COLUMN failure_code TEXT NOT NULL DEFAULT '';
+	ALTER TABLE results ADD COLUMN failure_phase TEXT NOT NULL DEFAULT '';
+	ALTER TABLE results ADD COLUMN failure_message TEXT NOT NULL DEFAULT '';
+	CREATE INDEX results_schedule ON results(schedule_id, id);`,
+	// 4: the server's settings (ADR-0030), one row each, the value as JSON.
+	`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 }
 
 func migrate(db *sql.DB) error {
@@ -103,10 +125,11 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
-// columns are in scanTargets order; insertColumns is the same minus id.
+// columns are in scanResult order; insertColumns is the same minus id.
 const insertColumns = `at, source, client, device, test_id, download_mbps, upload_mbps, idle_ms,
 	loaded_down_ms, loaded_up_ms, jitter_ms, streams, client_limited, bufferbloat_ms, grade, rpm,
-	server_bytes_down, server_bytes_up`
+	server_bytes_down, server_bytes_up, schedule_id, far_end, path_changed,
+	failure_code, failure_phase, failure_message`
 
 const columns = `id, ` + insertColumns
 
@@ -116,11 +139,16 @@ func (s *Store) Add(r result.Result) (result.Result, error) {
 	if len(r.Detail) > 0 {
 		detail = string(r.Detail)
 	}
+	var fail result.Failure
+	if r.Failure != nil {
+		fail = *r.Failure
+	}
 	res, err := s.db.Exec(`INSERT INTO results (`+insertColumns+`, detail)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.At.UnixMilli(), r.Source, r.Client, r.Device, r.TestID, r.DownloadMbps, r.UploadMbps, r.IdleMs,
 		r.LoadedDownMs, r.LoadedUpMs, r.JitterMs, r.Streams, r.ClientLimited, r.BufferbloatMs, r.Grade, r.RPM,
-		r.ServerBytesDown, r.ServerBytesUp, detail)
+		r.ServerBytesDown, r.ServerBytesUp, r.ScheduleID, r.FarEnd, r.PathChanged,
+		fail.Code, fail.Phase, fail.Message, detail)
 	if err != nil {
 		return r, err
 	}
@@ -145,8 +173,8 @@ func (s *Store) List(limit int, before int64, device string) ([]result.Result, e
 	defer rows.Close()
 	out := []result.Result{}
 	for rows.Next() {
-		var r result.Result
-		if err := rows.Scan(scanTargets(&r)...); err != nil {
+		r, err := scanResult(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -156,10 +184,8 @@ func (s *Store) List(limit int, before int64, device string) ([]result.Result, e
 
 // Get returns one result with its detail.
 func (s *Store) Get(id int64) (result.Result, error) {
-	var r result.Result
 	var detail sql.NullString
-	err := s.db.QueryRow(`SELECT `+columns+`, detail FROM results WHERE id = ?`, id).
-		Scan(append(scanTargets(&r), &detail)...)
+	r, err := scanResult(s.db.QueryRow(`SELECT `+columns+`, detail FROM results WHERE id = ?`, id), &detail)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -169,10 +195,21 @@ func (s *Store) Get(id int64) (result.Result, error) {
 	return r, err
 }
 
-func scanTargets(r *result.Result) []any {
-	return []any{&r.ID, (*unixMillis)(&r.At), &r.Source, &r.Client, &r.Device, &r.TestID, &r.DownloadMbps, &r.UploadMbps, &r.IdleMs,
-		&r.LoadedDownMs, &r.LoadedUpMs, &r.JitterMs, &r.Streams, &r.ClientLimited, &r.BufferbloatMs, &r.Grade, &r.RPM,
-		&r.ServerBytesDown, &r.ServerBytesUp}
+// rowScanner is a *sql.Row or *sql.Rows.
+type rowScanner interface{ Scan(dest ...any) error }
+
+// scanResult reads a row that selected columns, then extra, if any.
+func scanResult(rs rowScanner, extra ...any) (result.Result, error) {
+	var r result.Result
+	var fail result.Failure
+	err := rs.Scan(append([]any{&r.ID, (*unixMillis)(&r.At), &r.Source, &r.Client, &r.Device, &r.TestID,
+		&r.DownloadMbps, &r.UploadMbps, &r.IdleMs, &r.LoadedDownMs, &r.LoadedUpMs, &r.JitterMs, &r.Streams,
+		&r.ClientLimited, &r.BufferbloatMs, &r.Grade, &r.RPM, &r.ServerBytesDown, &r.ServerBytesUp,
+		&r.ScheduleID, &r.FarEnd, &r.PathChanged, &fail.Code, &fail.Phase, &fail.Message}, extra...)...)
+	if err == nil && fail.Code != "" {
+		r.Failure = &fail
+	}
+	return r, err
 }
 
 // unixMillis scans an INTEGER column of unix milliseconds into a time.Time.

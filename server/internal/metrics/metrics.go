@@ -47,10 +47,12 @@ const (
 	RoutePlan
 	RouteResults
 	RouteUI
+	RouteSchedules
+	RouteSettings
 	numRoutes
 )
 
-var routeNames = [numRoutes]string{"other", "dl", "ul", "ping", "plan", "results", "ui"}
+var routeNames = [numRoutes]string{"other", "dl", "ul", "ping", "plan", "results", "ui", "schedules", "settings"}
 
 // RouteOf maps a ServeMux pattern (http.Request.Pattern) to its route label.
 func RouteOf(pattern string) Route {
@@ -63,8 +65,14 @@ func RouteOf(pattern string) Route {
 		return RoutePing
 	case "GET /api/v1/plan":
 		return RoutePlan
-	case "POST /api/v1/results", "GET /api/v1/results", "GET /api/v1/results/{id}":
+	case "POST /api/v1/results", "GET /api/v1/results", "GET /api/v1/results/{id}", "GET /api/v1/results.csv":
 		return RouteResults
+	case "GET /api/v1/schedules", "POST /api/v1/schedules", "POST /api/v1/schedules/check",
+		"GET /api/v1/schedules/{id}", "PATCH /api/v1/schedules/{id}", "DELETE /api/v1/schedules/{id}",
+		"POST /api/v1/schedules/{id}/run":
+		return RouteSchedules
+	case "GET /api/v1/settings", "PATCH /api/v1/settings":
+		return RouteSettings
 	case "GET /":
 		return RouteUI
 	}
