@@ -24,6 +24,14 @@ longer than any compression window on the path; brotli's default window is
 | Idle keep-alive | 60 s | |
 | Stall timeout | 10 s per read or write | A test request is long by design, so there's no whole-request timeout. Instead each 256 KiB write and each 64 KiB read must finish within 10 s. |
 | Bytes per request | 16 GiB each way | A ceiling on every request. The plan's `max_bytes` (256 MiB) is what clients use. |
+| Metrics connections | 8 | Only on `DYNO_METRICS_LISTEN` (ADR-0017). A scraper or two, never a crowd. |
+| Metrics request timeout | 10 s whole request, read and write | Only on `DYNO_METRICS_LISTEN`. A scrape is one small reply, so unlike the test endpoints it gets a whole-request timeout. |
+| Test ids counted | 64 at once, 10 minutes each, server-issued only | `/api/v1/plan` issues the id. A full registry drops an expired test, else the oldest that hasn't moved a byte, else counts nothing new, so a burst of plans can't wipe running tests' counts. Amended 2026-11-01: any well-formed id was counted and the oldest test dropped even mid-transfer. |
+
+Amended 2026-11-01: the stall timeout was reset on every `Read` call, not
+every 64 KiB, so a client dripping one byte every 5 s held a connection
+forever, and 256 such connections locked everyone out. Each 64 KiB read now
+has the 10 s.
 
 **Upload replies say what the server saw:** `{"bytes", "elapsed_us"}` plus
 `Server-Timing`. An upload that stalls or aborts gets an explicit 408 or 400:
@@ -44,7 +52,9 @@ warmup, so the quick check skips it rather than fit a slope to a short, noisy
 run. `make bench` runs everything, including a 12-minute soak, idle RSS at
 60 s, and CPU and ping at 1 Gbit/s. It also appends a row to
 `bench/results/dyno-footprint.jsonl`. Every PR that touches `server/` pastes
-the `make bench` table.
+the `make bench` table. Both sizes run with `DYNO_METRICS_LISTEN` set and
+scrape `/metrics` during the load phases, so the budgets cover an operator
+who runs Prometheus.
 
 ## Consequences
 

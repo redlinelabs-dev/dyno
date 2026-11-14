@@ -6,6 +6,7 @@ package measure
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +14,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/redlinelabs-dev/dyno/server/internal/metrics"
+	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
 
 const (
@@ -38,9 +42,20 @@ var payload = func() []byte {
 var readBufs = sync.Pool{New: func() any { b := make([]byte, readChunk); return &b }}
 
 // Endpoints holds the measurement handlers. Stall is how long one read or
-// write may block before the connection is dropped.
+// write may block before the connection is dropped. Runs, if set, counts the
+// bytes of requests tagged with a test id (?t=, from the plan). Metrics, if
+// set, counts every byte and in-flight stream, tagged or not.
 type Endpoints struct {
-	Stall time.Duration
+	Stall   time.Duration
+	Runs    *testrun.Registry
+	Metrics *metrics.Metrics
+}
+
+func (e *Endpoints) counters(r *http.Request) *testrun.Counters {
+	if e.Runs == nil {
+		return nil
+	}
+	return e.Runs.Get(r.URL.Query().Get("t"))
 }
 
 // Register adds the measurement routes to mux.
@@ -61,11 +76,14 @@ func measurementHeaders(h http.Header) {
 
 // download streams ?bytes=N bytes of the random payload.
 func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
+	e.Metrics.StreamOpened(metrics.Download)
+	defer e.Metrics.StreamClosed(metrics.Download)
 	n, err := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)
 	if err != nil || n < 0 || n > MaxBytes {
-		http.Error(w, "bytes must be an integer from 0 to "+strconv.FormatInt(MaxBytes, 10), http.StatusBadRequest)
+		fail(w, http.StatusBadRequest, "bytes must be an integer from 0 to "+strconv.FormatInt(MaxBytes, 10))
 		return
 	}
+	tally := e.counters(r)
 	h := w.Header()
 	measurementHeaders(h)
 	h.Set("Content-Type", "application/octet-stream")
@@ -79,7 +97,12 @@ func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
 	for n > 0 {
 		c := min(int64(writeChunk), int64(PayloadSize-off), n)
 		rc.SetWriteDeadline(time.Now().Add(e.Stall))
-		if _, err := w.Write(payload[off : off+int(c)]); err != nil {
+		k, err := w.Write(payload[off : off+int(c)])
+		e.Metrics.AddSent(k) // one atomic add per 256 KiB chunk
+		if tally != nil {
+			tally.Down.Add(int64(k))
+		}
+		if err != nil {
 			return // client went away or stopped reading
 		}
 		n -= c
@@ -90,6 +113,8 @@ func (e *Endpoints) download(w http.ResponseWriter, r *http.Request) {
 // upload drains the body and reports what the server received. Upload speed
 // is computed from these numbers, never from client progress events (ADR-0003).
 func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
+	e.Metrics.StreamOpened(metrics.Upload)
+	defer e.Metrics.StreamClosed(metrics.Upload)
 	if r.ContentLength > MaxBytes {
 		tooLarge(w)
 		return
@@ -98,14 +123,21 @@ func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	bp := readBufs.Get().(*[]byte)
 	defer readBufs.Put(bp)
+	tally := e.counters(r)
 	var total int64
 	last := start
 	for {
+		// The stall timeout covers a whole 64 KiB read, not each Read call, so
+		// a client dripping a byte at a time can't hold the connection open.
 		rc.SetReadDeadline(time.Now().Add(e.Stall))
-		k, err := r.Body.Read(*bp)
+		k, err := fill(r.Body, *bp)
 		if k > 0 {
 			total += int64(k)
 			last = time.Now()
+			e.Metrics.AddReceived(k) // one atomic add per read of up to 64 KiB
+			if tally != nil {
+				tally.Up.Add(int64(k))
+			}
 		}
 		if total > MaxBytes {
 			tooLarge(w)
@@ -122,7 +154,7 @@ func (e *Endpoints) upload(w http.ResponseWriter, r *http.Request) {
 				code = http.StatusRequestTimeout
 			}
 			w.Header().Set("Connection", "close")
-			http.Error(w, "upload stalled or aborted", code)
+			fail(w, code, "upload stalled or aborted")
 			return
 		}
 	}
@@ -149,5 +181,33 @@ func ping(w http.ResponseWriter, r *http.Request) {
 
 func tooLarge(w http.ResponseWriter) {
 	w.Header().Set("Connection", "close")
-	http.Error(w, "upload larger than "+strconv.FormatInt(MaxBytes, 10)+" bytes", http.StatusRequestEntityTooLarge)
+	fail(w, http.StatusRequestEntityTooLarge, "upload larger than "+strconv.FormatInt(MaxBytes, 10)+" bytes")
+}
+
+// fail answers with {"error": msg}, like the rest of the API, and the
+// measurement headers, so a proxy treats an error like any other reply.
+func fail(w http.ResponseWriter, code int, msg string) {
+	h := w.Header()
+	measurementHeaders(h)
+	h.Set("Content-Type", "application/json")
+	h.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(code)
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	w.Write(append(b, '\n'))
+}
+
+// fill reads into b until it is full or the body ends. Unlike io.ReadFull it
+// returns the body's own error: io.EOF when the body finished, a short last
+// chunk included, and io.ErrUnexpectedEOF when it was cut short of its
+// Content-Length, which is an aborted upload.
+func fill(r io.Reader, b []byte) (int, error) {
+	n := 0
+	for n < len(b) {
+		k, err := r.Read(b[n:])
+		n += k
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }

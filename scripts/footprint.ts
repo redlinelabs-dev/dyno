@@ -9,12 +9,13 @@
 //                                     12-minute soak, CPU and ping at 1 Gbit/s,
 //                                     and a row in bench/results/dyno-footprint.jsonl
 //
-// The soak slope budget is defined over a 10-minute soak, so the quick mode
-// skips it rather than guess from a short run.
+// The leak budget is defined over a 10-minute soak, so the quick mode skips
+// it rather than guess from a short run.
 
 import { $ } from "bun";
-import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { dlopen, FFIType } from "bun:ffi";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
 
 const ROOT = `${import.meta.dir}/..`;
 process.chdir(ROOT);
@@ -23,12 +24,15 @@ const DYNO = "bin/dyno";
 const LOADGEN = "bin/loadgen";
 const PORT = 39660;
 const ADDR = `127.0.0.1:${PORT}`;
+// The metrics listener is on, as an operator with Prometheus runs it, and
+// gets scraped during the load phases, so ADR-0006 covers that setup too.
+const METRICS_ADDR = `127.0.0.1:${PORT + 1}`;
 
 // ADR-0006 budgets. Change them there first, with measurements.
 const BUDGET = {
-  idleRssMiB: 16,
+  idleRssMiB: 24,
   peakRssMiB: 48,
-  soakSlopeKiBPerMin: 16,
+  leakKiBPerMin: 16, // the soak's live-heap and outside-Go slopes
 };
 
 // Pin server and clients apart, as bench/ does, when there are cores to spare.
@@ -55,9 +59,13 @@ function procStatus(pid: number): Record<string, number> {
   return out;
 }
 
+// Each run gets an empty results database, as a fresh install would.
+const DATA = mkdtempSync(`${tmpdir()}/dyno-footprint-`);
+process.on("exit", () => rmSync(DATA, { recursive: true, force: true }));
+
 async function start() {
   const proc = Bun.spawn(pinned(SERVER_CPUS, [DYNO]), {
-    env: { ...process.env, DYNO_LISTEN: ADDR, GOMEMLIMIT: "64MiB" },
+    env: { ...process.env, DYNO_LISTEN: ADDR, DYNO_METRICS_LISTEN: METRICS_ADDR, DYNO_DATA: DATA, GOMEMLIMIT: "64MiB" },
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -76,6 +84,88 @@ async function stop(proc: Bun.Subprocess) {
   if (proc.exitCode === null) proc.kill("SIGKILL");
   await proc.exited;
 }
+
+// scrape fetches /metrics every everyMs until the returned stop is awaited,
+// counting scrapes and failures.
+function scrape(everyMs: number) {
+  let done = false;
+  const n = { ok: 0, failed: 0 };
+  const loop = (async () => {
+    while (!done) {
+      try {
+        const r = await fetch(`http://${METRICS_ADDR}/metrics`);
+        await r.arrayBuffer();
+        if (r.ok) n.ok++;
+        else n.failed++;
+      } catch {
+        n.failed++;
+      }
+      await sleep(everyMs);
+    }
+  })();
+  return async () => {
+    done = true;
+    await loop;
+    return n;
+  };
+}
+
+// memSampler scrapes /metrics every everyMs and reads the server's RssAnon in
+// the same moment, until the returned stop is awaited. It returns each
+// minute's lowest live heap and lowest anonymous memory outside Go (RssAnon
+// minus Go's mapped memory not yet returned to the OS), from minute 2 on, and
+// the least-squares slope through each set of floors.
+function memSampler(pid: number, everyMs: number) {
+  let done = false;
+  const n = { ok: 0, failed: 0 };
+  const pts: { t: number; live: number; outside: number }[] = [];
+  const t0 = performance.now();
+  const gauge = (text: string, name: string) => Number(text.match(new RegExp(`^${name} (\\S+)$`, "m"))?.[1] ?? NaN);
+  const loop = (async () => {
+    while (!done) {
+      try {
+        const r = await fetch(`http://${METRICS_ADDR}/metrics`);
+        const text = await r.text();
+        const anonKiB = Number(readFileSync(`/proc/${pid}/status`, "utf8").match(/^RssAnon:\s+(\d+)/m)?.[1] ?? NaN);
+        const live = gauge(text, "go_gc_heap_live_bytes");
+        const goResident = gauge(text, "go_memory_classes_total_bytes") - gauge(text, "go_memory_classes_heap_released_bytes");
+        if (!r.ok || [anonKiB, live, goResident].some(Number.isNaN)) throw new Error("bad scrape");
+        n.ok++;
+        pts.push({ t: (performance.now() - t0) / 1000, live: live / 1024, outside: anonKiB - goResident / 1024 });
+      } catch {
+        n.failed++;
+      }
+      await sleep(everyMs);
+    }
+  })();
+  const floors = (key: "live" | "outside") => {
+    const byMin = new Map<number, number[]>();
+    for (const p of pts) {
+      const m = Math.floor(p.t / 60);
+      if (m >= 2) byMin.set(m, [...(byMin.get(m) ?? []), p[key]]);
+    }
+    const full = (60_000 / everyMs) / 2; // a minute counts once half its samples are in
+    return [...byMin].filter(([, v]) => v.length >= full).map(([m, v]) => [m, Math.round(Math.min(...v))] as [number, number]);
+  };
+  const slope = (xy: [number, number][]) => {
+    const k = xy.length;
+    const sx = xy.reduce((s, [x]) => s + x, 0), sy = xy.reduce((s, [, y]) => s + y, 0);
+    const sxx = xy.reduce((s, [x]) => s + x * x, 0), sxy = xy.reduce((s, [x, y]) => s + x * y, 0);
+    return (k * sxy - sx * sy) / (k * sxx - sx * sx);
+  };
+  return async () => {
+    done = true;
+    await loop;
+    const live = floors("live"), outside = floors("outside");
+    return { scrapes: n, liveFloors: live, outsideFloors: outside, liveSlope: slope(live), outsideSlope: slope(outside) };
+  };
+}
+
+const scrapes = { ok: 0, failed: 0 };
+const addScrapes = (n: { ok: number; failed: number }) => {
+  scrapes.ok += n.ok;
+  scrapes.failed += n.failed;
+};
 
 async function loadgen(mode: string, flags: Record<string, string | number>, cpus = CLIENT_CPUS) {
   const argv = pinned(cpus, [LOADGEN, mode, ...Object.entries(flags).map(([k, v]) => `-${k}=${v}`)]);
@@ -107,8 +197,10 @@ const info = (check: string, value: string) => report.push({ check, value, budge
     log("peak RSS: 32 download streams, then 32 upload streams");
     await Bun.write(`/proc/${pid}/clear_refs`, "5"); // reset VmHWM
     const w = { pid, c: 32, bytes: 32 << 20, warmup: "1s", dur: FULL ? "6s" : "4s" };
+    const stopScrape = scrape(1000);
     const dl = await loadgen("dl", { addr: ADDR, ...w });
     const ul = await loadgen("ul", { addr: ADDR, ...w });
+    addScrapes(await stopScrape());
     const peak = procStatus(pid).VmHWM!;
     gate("peak RSS, 32 streams", mib(peak), BUDGET.peakRssMiB, "MiB");
     info("download, 32 streams", `${dl.gbit_s.toFixed(1)} Gbit/s, ${dl.cpu_s_per_gb.toFixed(3)} CPU-s/GB, ${dl.errors} errors`);
@@ -158,24 +250,73 @@ const info = (check: string, value: string) => report.push({ check, value, budge
   }
 }
 
-// 3. Soak: 12 minutes of mixed traffic, slope fitted after the 2-minute warmup.
+// 3. Soak: 12 minutes of mixed traffic. A leak is growth without a ceiling, so
+// the gate is on the two numbers a leak has to raise and nothing else does:
+// Go's live heap after collection, and anonymous memory outside Go's own
+// accounting (SQLite's allocator, say). Each minute contributes its lowest
+// reading, so data in flight at a collection doesn't count, and the slope is
+// fitted through those floors after the 2-minute warmup. RSS itself moves in
+// steps as Go returns pages to the OS and takes them back (ADR-0006), so it
+// has a ceiling, not a slope budget.
+//
+// SQLite's memory fills to a ceiling of about 4.5 MiB over the first ~6,000
+// stored results, then grows a few bytes per result. The soak stores only 360,
+// so the database is filled first and the soak measures the state a server
+// reaches after its first weeks, not the fill.
+//
+// The soak's server runs without transparent huge pages. With THP "always",
+// khugepaged merges 2 MiB stretches of memory into huge pages even when most
+// of each stretch is free: in Go's heap after Go has returned the pages, and in
+// SQLite's allocator. RSS then jumps by up to 2 MiB at a random minute while
+// Go's counters don't move, which read as 27 to 190 KiB/min of growth outside
+// Go (ADR-0006). PR_SET_THP_DISABLE is inherited by every process this script
+// starts from here on, and the soak is the last server it starts. The earlier
+// checks keep THP, as a real install has it.
+function disableTHP() {
+  const libc = dlopen("libc.so.6", { prctl: { args: [FFIType.i32, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64], returns: FFIType.i32 } });
+  if (libc.symbols.prctl(41 /* PR_SET_THP_DISABLE */, 1, 0, 0, 0) !== 0) throw new Error("prctl(PR_SET_THP_DISABLE) failed");
+  libc.close();
+}
+const SEED_RESULTS = 8000;
+const SEED_BODY = `{"test_id":"","client":"footprint","device":"footprint-seed","download_mbps":938.2,"upload_mbps":412.6,"idle_ms":8.4,"loaded_down_ms":21,"loaded_up_ms":39.5,"jitter_ms":0.8,"streams":5,"client_limited":false}`;
 if (FULL) {
+  disableTHP();
   const proc = await start();
   try {
+    if (!/^THP_enabled:\s+0$/m.test(readFileSync(`/proc/${proc.pid}/status`, "utf8"))) throw new Error("the soak's server still has THP enabled");
+    log(`soak: storing ${SEED_RESULTS} results first`);
+    for (let i = 0; i < SEED_RESULTS; i++) {
+      const r = await fetch(`http://${ADDR}/api/v1/results`, { method: "POST", body: SEED_BODY, headers: { "content-type": "application/json" } });
+      await r.text();
+      if (r.status !== 201) throw new Error(`seeding results: HTTP ${r.status}`);
+      if (i % 4 === 0) await (await fetch(`http://${ADDR}/api/v1/results?limit=50`)).text();
+    }
     log("soak: 12 minutes of mixed traffic");
+    const mem = memSampler(proc.pid, 2000);
     const s = await loadgen("soak", { addr: ADDR, pid: proc.pid, dur: "720s", sample: "5s" });
-    gate("soak RSS slope after 2 min warmup", s.slope_kib_per_min_after_2m, BUDGET.soakSlopeKiBPerMin, "KiB/min");
+    const m = await mem();
+    addScrapes(m.scrapes);
+    gate("soak live heap slope, per-minute floors", m.liveSlope, BUDGET.leakKiBPerMin, "KiB/min");
+    gate("soak memory outside Go, slope", m.outsideSlope, BUDGET.leakKiBPerMin, "KiB/min");
+    gate("soak RSS max", mib(s.rss_max_kib), BUDGET.peakRssMiB, "MiB");
     const errs = Object.entries(s.errors as Record<string, number>).map(([k, v]) => `${k} ${v}`).join(", ") || "none";
-    info("soak RSS first → last, max", `${mib(s.rss_first_kib).toFixed(1)} → ${mib(s.rss_last_kib).toFixed(1)} MiB, max ${mib(s.rss_max_kib).toFixed(1)} MiB; errors: ${errs}`);
+    info("soak RSS first → last; slope after 2 min", `${mib(s.rss_first_kib).toFixed(1)} → ${mib(s.rss_last_kib).toFixed(1)} MiB; ${s.slope_kib_per_min_after_2m.toFixed(0)} KiB/min; errors: ${errs}`);
     const { samples: _, ...soak } = s;
-    measured.soak = soak;
+    measured.soak = { ...soak, live_heap_floor_kib_by_min: m.liveFloors, outside_go_floor_kib_by_min: m.outsideFloors, live_heap_slope_kib_per_min: m.liveSlope, outside_go_slope_kib_per_min: m.outsideSlope };
   } finally {
     await stop(proc);
   }
 } else {
-  info("soak RSS slope", "skipped in quick mode; `make bench` runs it");
+  info("soak leak check", "skipped in quick mode; `make bench` runs it");
 }
 
+report.push({
+  check: "metrics scrapes during load",
+  value: `${scrapes.ok} ok, ${scrapes.failed} failed`,
+  budget: "none failed",
+  pass: scrapes.ok > 0 && scrapes.failed === 0,
+});
+measured.metrics_scrapes = scrapes;
 info("binary size", `${(statSync(DYNO).size / 2 ** 20).toFixed(2)} MiB`);
 info("CPU pinning", pin ? `server ${SERVER_CPUS}, clients ${CLIENT_CPUS}` : "none (fewer than 8 cores or no taskset)");
 

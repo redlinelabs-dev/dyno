@@ -1,0 +1,8 @@
+# This dyno server belongs to whoever runs it, so its page asks not to be
+# indexed (meta robots noindex) and crawlers stay out of the test history and
+# the test endpoints. AI crawlers get the same rules as everyone else.
+User-agent: *
+Disallow: /api/
+Disallow: /dl
+Disallow: /ul
+Disallow: /ping

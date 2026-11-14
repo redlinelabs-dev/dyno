@@ -7,28 +7,39 @@ IMAGE   ?= dyno:dev
 
 export CGO_ENABLED = 0
 
-.PHONY: build loadgen check fmt vet test footprint bench image image-multiarch clean
+.PHONY: web build loadgen check fmt vet test webcheck footprint bench image image-multiarch clean
 
-## build: the static server binary at bin/dyno
-build:
+## web: the web UI, built by Bun into the folder the server embeds
+web: web/node_modules
+	bun web/build.ts
+
+web/node_modules: web/package.json
+	cd web && bun install --frozen-lockfile
+	@touch $@
+
+## build: the static server binary at bin/dyno, web UI included
+build: web
 	cd server && $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o ../bin/dyno .
 
 ## loadgen: the bench load generator the footprint check drives
 loadgen:
 	cd bench/loadgen && $(GO) build -trimpath -o ../../bin/loadgen .
 
-## check: formatting, vet, race tests and the quick footprint check (~2 min)
-check: fmt vet test footprint
+## check: formatting, vet, race tests, web typecheck and tests, quick footprint check (~2 min)
+check: fmt vet test webcheck footprint
 
 fmt:
 	@out=$$($(GOFMT) -l server bench/loadgen); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
-vet:
+vet: web
 	cd server && $(GO) vet ./...
 
 # The race detector needs cgo.
-test:
+test: web
 	cd server && CGO_ENABLED=1 $(GO) test -race ./...
+
+webcheck: web/node_modules
+	cd web && bunx tsc --noEmit && bun test
 
 footprint: build loadgen
 	bun scripts/footprint.ts
@@ -46,4 +57,4 @@ image-multiarch:
 	docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=$(VERSION) -t $(IMAGE) .
 
 clean:
-	rm -rf bin
+	rm -rf bin server/internal/webui/dist

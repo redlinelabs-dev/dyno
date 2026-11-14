@@ -1,0 +1,13 @@
+{
+  "name": "dyno-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build.ts",
+    "check": "tsc --noEmit && bun test"
+  },
+  "devDependencies": {
+    "playwright-core": "1.49.1",
+    "typescript": "5.9.3"
+  }
+}

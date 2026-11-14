@@ -43,11 +43,70 @@ own toolchain, where Rust needed `zig cc` for SQLite.
 Not negligent, not tuned to the last byte. Each has headroom over what Go
 measured, and the footprint check fails the build when one is exceeded.
 
-- Idle RSS ≤ 16 MiB with an empty database (10.8 MiB measured without SQLite).
-  Re-measure once M1 adds SQLite, and adjust once with numbers.
+- Idle RSS ≤ 24 MiB with an empty database. This is the one adjustment,
+  made in M2 with SQLite and the web UI in. It was 16 MiB, set from 10.8 MiB
+  measured without SQLite. Measured by hand after 10 s idle: M1 was 15.2 MiB,
+  M2 is 18.6 MiB, and the footprint check read 20.5 MiB. Anonymous memory
+  didn't move (9.3 MiB in both). All of the growth
+  is file-backed pages of the larger binary (6.95 → 11.34 MiB), which the
+  kernel can reclaim. Don't raise this again; cut instead.
 - Peak RSS ≤ 48 MiB at 32 concurrent streams.
-- Soak slope ≤ +16 KiB/min over 10 minutes after a 2-minute warmup.
+- No leak over a 12-minute soak of mixed traffic (tests, pings, result posts
+  and history reads). After a 2-minute warmup, the per-minute floor of Go's
+  live heap and the per-minute floor of memory outside Go each grow by
+  ≤ +16 KiB/min, and RSS stays ≤ 48 MiB throughout. Amended 2026-10-31; see
+  below.
 - Stalled connections are closed by timeout.
+
+### Leak budget, not an RSS slope (amended 2026-10-31)
+
+The budget was "soak RSS slope ≤ +16 KiB/min". Every full run since M2 failed
+it (192, 110 and 161 KiB/min) and so did M1 when rerun (24), while RSS ended
+near 29 MiB each time. The owner: "A single step-up is not a leak. A leak is
+something that increases memory usage unconstrained. If an increase is
+constrained then that's by definition not a leak".
+
+The diagnosis agrees. With every sample kept and the runtime's own counters
+logged, the memory Go had mapped stayed at 25,530 KiB from the first minute to
+the twelfth. RSS moved only when the runtime handed heap pages back to the
+kernel and took them again, in 384 KiB steps, and once a run is past warmup
+one such step inside the window is enough to read as 100+ KiB/min. The same
+soak at a third of the traffic measured +3. An RSS slope over 10 minutes
+measures when the allocator happens to reuse pages, not whether memory grows.
+
+So the check now measures growth directly. `/metrics` exports Go's live heap,
+the memory it has mapped and the part it has released; the footprint check
+scrapes them every 2 s alongside `RssAnon`. Live heap that keeps rising is a
+Go leak; `RssAnon` minus Go's resident memory that keeps rising is a leak in
+SQLite or anything else outside Go. Floors per minute ignore the GC sawtooth,
+and the RSS ceiling still catches a large one-off jump. The RSS slope stays in
+the table as information.
+
+The first run of the new check passed the live heap (+5.7 KiB/min) and failed
+memory outside Go (+33). That memory is SQLite's, allocated by modernc's own
+allocator. Diffing `/proc/pid/smaps` across rounds of 2,000 stored results
+showed it filling to about 4.5 MiB within the first ~6,000 results, then
+growing by 4 to 8 KiB per 2,000. The soak stores 360 results, so it measured
+only the fill. The footprint check now stores 8,000 results before the soak
+starts and measures the filled state a server reaches in its first weeks.
+
+Amended 2026-11-01: the soak's server runs with transparent huge pages off
+(`prctl(PR_SET_THP_DISABLE)`, set by the footprint script and inherited). Three
+soaks in a row failed the outside-Go slope (82, 27 and 190 KiB/min, the last
+on the code that had passed), each with one jump of 0.5 to 1.5 MiB that then
+held or eased. This box runs THP `always` with khugepaged's `max_ptes_none` at
+511, so the kernel merges a 2 MiB stretch into one huge page even when only
+one of its 512 pages is in use, and RSS rises with no allocation behind it. A
+probe that diffed `/proc/pid/smaps` at each jump found it in two places: Go's
+heap, exactly 2,048 KiB, after Go had returned the pages; and the mappings of
+SQLite's allocator, 1.5 MiB in one holding 2 MiB of huge pages. Go's counters
+didn't move either time, so the check called it growth outside Go. The WAL
+stayed at 4 MiB throughout. `GODEBUG=disablethp=1` covers only Go's heap: of
+five soaks with it, two still jumped, and the one the probe caught was in
+SQLite's memory. With THP off for the whole process, three soaks held zero
+huge pages and no jump, and memory outside Go settled within its first three
+minutes. The earlier checks keep THP, as a real install has it; the Go GC
+guide's advice for such hosts is `max_ptes_none` 0.
 
 ## Consequences
 

@@ -4,5 +4,11 @@ services:
     build: .                # M4 swaps this for the published image
     network_mode: host      # no NAT or userland proxy in the measured path (ADR-0003)
     restart: unless-stopped
+    volumes:
+      - dyno-data:/data     # test history (SQLite)
     # environment:
     #   DYNO_LISTEN: ":3966"  # address and port to listen on
+    #   DYNO_METRICS_LISTEN: "127.0.0.1:3967"  # Prometheus /metrics on its own listener; off when unset
+
+volumes:
+  dyno-data:

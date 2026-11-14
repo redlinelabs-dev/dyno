@@ -53,3 +53,16 @@ an ADR records the owner changing their mind.
 | 5 | Phone and desktop | Works and looks right at 360 px wide and on a desktop; tested in mobile Safari and Chrome on Android. |
 | 6 | Native app later | The web UI uses only the public HTTP API, the same one a native app would use. No server-rendered state the API can't reach. |
 | 7 | Freemium | The licence and the free/paid split are chosen (see `docs/decisions-pending.md`), and the code keeps paid features in a separable place. |
+
+## Added 2026-10-31
+
+The owner, after the first homelab deploy was attempted by hand:
+
+> I want this to have the potential to be a super popular self-hosted solution
+> for folks. This would mean it should be dead simple for people to spin this
+> up. A robust solution for LXC's and docker containers should be documented.
+> And this is going to be open source, right? If it's not open source already?
+
+| # | Criterion | How we check it |
+|---|---|---|
+| 8 | Dead simple to install | Documented, tested install paths for Docker (compose and `docker run`) and a Proxmox LXC, each ending in a working test page. The LXC path is used for the owner's own install on circuit before it's documented as done. |
