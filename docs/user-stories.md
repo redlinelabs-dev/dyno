@@ -59,18 +59,18 @@ a check named beside it), **building**, **next**, **later**, and **your call**
 
 | # | Story | Status |
 |---|---|---|
-| 17 | As a homelabber, I want dyno to test my internet on a schedule against another dyno I run (a VPS, a relative's house), so I have a record of what my ISP delivers. | building: the engine that tests one dyno against another |
-| 18 | As a homelabber, I want a light test for frequent runs, so a far end on a metered line isn't drained. | building: with the engine |
+| 17 | As a homelabber, I want dyno to test my internet on a schedule against another dyno I run (a VPS, a relative's house), so I have a record of what my ISP delivers. | built: server side and API; waiting on the monitoring UI (prototype pick, above) and a run against a real far end |
+| 18 | As a homelabber, I want a light test for frequent runs, so a far end on a metered line isn't drained. | built: server side and API; waiting on the monitoring UI (prototype pick, above) and a run against a real far end |
 | 19 | As a homelabber with more than one far end, I want each one as its own line, so one bad path doesn't hide in an average. | next |
-| 20 | As a homelabber, I want a failed scheduled test kept with its reason, and the reason saying which end failed, because a far end being down is not an ISP outage. | next |
-| 21 | As a homelabber, I want a test that ran over a slower path (a tailnet relay) flagged, not counted as my ISP being slow. | next |
-| 22 | As a homelabber, I want to see when each schedule last ran and runs next, and to change schedules without a restart. | next |
+| 20 | As a homelabber, I want a failed scheduled test kept with its reason, and the reason saying which end failed, because a far end being down is not an ISP outage. | built: server side and API; waiting on the monitoring UI (prototype pick, above) and a run against a real far end |
+| 21 | As a homelabber, I want a test that ran over a slower path (a tailnet relay) flagged, not counted as my ISP being slow. | built: server side and API; waiting on the monitoring UI (prototype pick, above) and a run against a real far end |
+| 22 | As a homelabber, I want to see when each schedule last ran and runs next, and to change schedules without a restart. | built: server side and API; waiting on the monitoring UI (prototype pick, above) and a run against a real far end |
 | 23 | As a homelabber, I want one range picker (24 h, 7 d, 30 d, custom) for every chart, not one per chart. | your call: layout |
 | 24 | As a homelabber, I want min, max, average and p10 for the range, readable without hovering. | your call: layout |
 | 25 | As a homelabber, I want failed runs marked on the chart, not hidden. | your call: layout |
 | 26 | As a homelabber, I want to watch a scheduled test live when the page is open. | your call: layout; the server side is next |
-| 27 | As a homelabber, I want to export results as CSV. | next |
-| 28 | As a homelabber, I want results kept forever by default, or for a number of days I choose. | next |
+| 27 | As a homelabber, I want to export results as CSV. | built: server side and API; waiting on the monitoring UI (prototype pick, above) and a run against a real far end |
+| 28 | As a homelabber, I want results kept forever by default, or for a number of days I choose. | built: server side and API; waiting on the monitoring UI (prototype pick, above) and a run against a real far end |
 | 29 | As a household, we want our own browser tests on the same chart when we ask for them, one line per device. | your call: layout |
 
 ## Get told when it matters [~84]

@@ -217,5 +217,7 @@ Needs: nothing open. Packet loss: ADR-0025.
   cloudflare-speed-cli 1,082].
 - A light theme that follows the system [under 10]. Brand question first.
 - A multi-node fleet view, an iOS app (#10), white-label and SSO for pro (#6).
+  Before the iOS app: every API time printed with exactly three fraction
+  digits (ADR-0031), so Apple's date parsers read every field.
 - Not planned: InfluxDB and OpenTelemetry export. Prometheus covers the
   homelab case, and OTel's SDK costs more footprint than it returns here.
