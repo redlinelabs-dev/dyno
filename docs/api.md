@@ -2,10 +2,12 @@
 
 The contract every client uses: the web UI, a future native app, scripts.
 The web UI gets nothing beyond this (ADR-0002). Plain HTTP/1.1; keep bulk
-transfers off HTTP/2 and HTTP/3 (ADR-0003).
+transfers off HTTP/2 and HTTP/3 (ADR-0003). Every JSON reply, errors
+included, is `Content-Type: application/json`.
 
-Status: M2.5. `/metrics` is in, on its own listener. `/.well-known/nq`
-arrives in a later milestone and will be added here.
+Status: M3, server side. Schedules, settings, history by range, CSV export and
+retention are in; the web UI for them comes next. `/metrics` is on its own
+listener. `/.well-known/nq` arrives in a later milestone and will be added here.
 
 ## Running a test
 
@@ -152,9 +154,9 @@ A failure's `code` says what was seen, which points at an end:
 
 | `code` | What was seen |
 |---|---|
-| `unreachable` | No connection: the name didn't resolve, the port refused, or there was no route. The far end may be down, or this end's connection may be |
+| `unreachable` | No connection: the name didn't resolve, the port refused, there was no route, or TLS failed (an untrusted certificate, say). The far end may be down, or this end's connection may be |
 | `timeout` | Connected, but a reply didn't come in time, or the run passed 5 minutes |
-| `not_dyno` | Something answered that isn't a dyno, or it redirected |
+| `not_dyno` | Something answered that isn't a dyno: its plan request got an error status or a reply that isn't a dyno plan, or it redirected |
 | `http_status` | The far end answered a test request with an error status |
 | `stream_failed` | A transfer broke off part way |
 | `bad_far_end` | The stored address can't be a far end |
@@ -199,7 +201,10 @@ leading `'`, so a spreadsheet doesn't run it as a formula (ADR-0030). A bad
 parameter is `400` with `{"error": "..."}`, before any CSV is sent.
 
 Neither list holds the database while it writes: rows are read at most 500
-at a time, so a client that stops reading doesn't hold up anyone else.
+at a time, so a client that stops reading doesn't hold up anyone else. If
+the database fails after rows were sent, the server breaks the connection
+instead of ending the reply, so a client never mistakes part of a list for
+all of it.
 
 ### `GET /api/v1/results/{id}`
 
@@ -236,15 +241,15 @@ A schedule as the API returns it:
 | Field | Meaning |
 |---|---|
 | `id` | Never reused, even after a delete |
-| `name` | Up to 64 bytes of UTF-8 without control characters, trimmed of surrounding spaces. Empty means the far end's host |
-| `far_end` | The far end's base URL. What's sent is normalized: no scheme means `http://`, and then no port means `:3966`, so `tailmeadow` and `tailmeadow:3966` both become `http://tailmeadow:3966`. With a scheme, its default port applies, so `https://dyno.example.com` stays as it is. Only `http` and `https`, with no path (a lone `/` is dropped), query, fragment or user info. An IPv6 address goes in brackets. Scheme and host are lowercased |
+| `name` | Up to 64 bytes of UTF-8 without control characters, trimmed of surrounding spaces. Empty means the far end's host, cut to 64 bytes if it is longer |
+| `far_end` | The far end's base URL. What's sent is normalized: no scheme means `http://`, and then no port means `:3966`, so `tailmeadow` and `tailmeadow:3966` both become `http://tailmeadow:3966`. With a scheme, its default port applies, so `https://dyno.example.com` stays as it is. Only `http` and `https`, with no path (a lone `/` is dropped), query, fragment or user info. An IPv6 address goes in brackets. A host name is ASCII, so write any other as punycode (`xn--…`). Scheme and host are lowercased |
 | `kind` | `light` (the default, also for `""`): at most 5 s per direction after a 1 s warm-up, and at most 100 MiB each way. `full`: the far end's plan as it is |
 | `every_minutes` | 15, 20, 30, 60, 120, 180 (the default, also for `0`), 240, 360, 480, 720 or 1440 |
 | `offset_minutes` | Runs happen at midnight UTC plus `offset_minutes`, plus multiples of `every_minutes`. 0 (the default) to `every_minutes` − 1 |
 | `paused` | A paused schedule runs only when asked to, through `/run` |
 | `created_at`, `updated_at` | Server times |
 | `next_run` | The next time on its grid after now; `null` when paused |
-| `running`, `queued` | A run of it is going, or is waiting for another schedule's run |
+| `running`, `queued` | A run of it is going, or is waiting: for another schedule's run, or for a test this dyno is serving to end |
 | `last_result` | Its newest result, failed or not, without `detail`; `null` before the first |
 | `last_success_at` | When its newest successful result was stored; `null` if none |
 
@@ -256,6 +261,10 @@ stopped and stored as `timeout`. Warm-up, clamps and failures follow ADR-0028.
 Request bodies are one JSON object, at most 4 KiB. An unknown field, a wrong
 type or a value out of range is `400` with `{"error": "..."}` naming the
 field, and changes nothing.
+
+A failure on this server's side is `500` with `{"error": "..."}`: a database
+that refuses a read or a write, or a far-end check that failed inside dyno
+rather than at the far end. The server's log says why (ADR-0020).
 
 ### `GET /api/v1/schedules`
 
@@ -277,7 +286,8 @@ Body: `{"far_end": "tailmeadow"}`. The reply is one of:
 - `422` with `{"error": "...", "code": "unreachable"}` when the check fails.
   The code is `unreachable`, `timeout` or `not_dyno`, and the error is a plain
   sentence;
-- `503` with `Retry-After: 1` when 4 checks are running already.
+- `503` with `Retry-After: 1` when 4 checks are running already, or when the
+  server is stopping (the `error` says which).
 
 ### `POST /api/v1/schedules`
 
@@ -287,7 +297,7 @@ as above. The reply is one of:
 - `201` with `Location: /api/v1/schedules/<id>` and the schedule;
 - `400` for bad input;
 - `422` when the check fails, with nothing saved;
-- `409` when 16 schedules exist already;
+- `409` when 16 schedules exist already, before any check;
 - `503` as above.
 
 The schedule runs from its next time on, with no restart.
@@ -295,10 +305,14 @@ The schedule runs from its next time on, with no restart.
 ### `PATCH /api/v1/schedules/{id}`
 
 Changes the fields sent and leaves the rest. Only a changed `far_end` is
-checked (`422` when that fails), so a schedule can be paused or retimed while
-its far end is down. A `name` of `""` goes back to the far end's host. The
-reply is `200` with the schedule, `400`, or `404`. `next_run` reflects the
-change at once.
+checked, so a schedule can be paused or retimed while its far end is down. A
+`name` of `""` goes back to the far end's host. The reply is one of:
+- `200` with the schedule; `next_run` reflects the change at once;
+- `400` for bad input, or a patch that leaves the schedule invalid;
+- `404` if there's no such id;
+- `422` when the check of a changed `far_end` fails, with nothing changed;
+- `503` with `Retry-After: 1` when `far_end` changed and 4 checks are
+  running already, or the server is stopping.
 
 ### `DELETE /api/v1/schedules/{id}`
 
@@ -310,7 +324,8 @@ results stay. `404` if there's no such id.
 Queues a run now, paused or not, and replies `202` with the schedule, with
 `queued` or `running` set. A schedule that is queued or running already isn't
 queued again. `429` with `Retry-After` (seconds) when its last result was
-stored less than 60 s ago. `404` if there's no such id.
+stored less than 60 s ago. `404` if there's no such id. `503` if this server
+isn't running scheduled tests.
 
 ## Settings
 
@@ -328,10 +343,12 @@ stored less than 60 s ago. `404` if there's no such id.
 ### `PATCH /api/v1/settings`
 
 Changes the fields sent, leaves the rest, and replies `200` with every
-setting. Bodies follow the rules under Schedules: an unknown field, a wrong
-type or a value out of range is `400`, and nothing changes. Old results are
-deleted at start, every hour, and at once when `keep_days` changes
-(ADR-0030).
+setting. `{}` changes nothing and replies `200` too. Bodies follow the rules
+under Schedules: an unknown field, a wrong type or a value out of range is
+`400`, and nothing changes. Old results are deleted at start, every hour, and
+at once when `keep_days` is sent (ADR-0030). If that deletion fails, the
+reply is still `200`: the settings are saved, the failure is logged, and the
+hourly run tries again.
 
 ## Metrics: `GET /metrics`
 

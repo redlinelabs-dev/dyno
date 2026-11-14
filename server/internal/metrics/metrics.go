@@ -107,12 +107,18 @@ type Metrics struct {
 	streams  [len(directionNames)]atomic.Int64
 	requests [numRoutes][maxCode - minCode + 1]atomic.Uint64
 
+	// lastClose is when a stream last closed, in Unix nanoseconds; 0 means
+	// none has. Serving reads it.
+	lastClose atomic.Int64
+
 	mu       sync.Mutex
 	byGrade  [len(grades)]uint64
 	download histogram
 	upload   histogram
 	idle     histogram
 	loaded   histogram
+
+	sched schedules // per-schedule series (schedules.go); its own lock
 }
 
 // New returns empty metrics for a server of the given version.
@@ -150,6 +156,9 @@ func (m *Metrics) StreamOpened(d Direction) {
 
 func (m *Metrics) StreamClosed(d Direction) {
 	if m != nil {
+		// Stamp before the decrement, so a reader that sees the gauge at
+		// zero also sees the stamp.
+		m.lastClose.Store(time.Now().UnixNano())
 		m.streams[d].Add(-1)
 	}
 }
@@ -224,6 +233,7 @@ func (m *Metrics) Append(b []byte) []byte {
 	b = m.idle.append(b, "dyno_result_idle_latency_seconds", "Idle latency of stored results.")
 	b = m.loaded.append(b, "dyno_result_loaded_latency_seconds", "Loaded latency of stored results, the worse of download and upload.")
 	m.mu.Unlock()
+	b = m.sched.append(b)
 
 	b = header(b, "dyno_bytes_sent_total", "counter", "Bytes written by /dl.")
 	b = sampleUint(b, "dyno_bytes_sent_total", m.sent.Load())

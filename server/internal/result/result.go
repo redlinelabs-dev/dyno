@@ -9,6 +9,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
@@ -97,6 +98,9 @@ func (s *Submission) Validate() error {
 	}
 	if !ValidDevice(s.Device) {
 		return errors.New("device must be up to 64 letters, digits, - or _")
+	}
+	if len(s.Detail) > 0 && (!utf8.Valid(s.Detail) || !json.Valid(s.Detail)) {
+		return errors.New("detail must be valid UTF-8 JSON, or empty")
 	}
 	if len(s.Client) > maxClientLen {
 		s.Client = strings.ToValidUTF8(s.Client[:maxClientLen], "")

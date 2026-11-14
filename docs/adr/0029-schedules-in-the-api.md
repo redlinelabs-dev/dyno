@@ -52,6 +52,24 @@ timed. The contract is `docs/api.md`, "Schedules".
   `dyno_result_*` histograms, which keep meaning client results. Existing
   dashboards don't change.
 
+Amended 2026-11-14, from building the schedules API:
+
+- **A host name is ASCII:** letters, digits, `-`, `_` and `.`, in labels of
+  up to 63 characters. A name in another script goes in as punycode
+  (`xn--…`). Turning Unicode names into punycode needs IDNA tables the
+  standard library doesn't have, and the stored form must be the address
+  dyno dials. An IPv6 address goes in brackets, without a zone.
+- **A check that fails on this server's side is a `500`** with
+  `check_failed`, not a `422`. A `422` says the far end failed the check;
+  this says dyno did.
+- **A `PATCH` changes only the fields it sends**, even when another change
+  lands during its far-end check. After the check, the API merges the patch
+  with the schedule as stored again, and saves it under one lock.
+- **"Serving `/dl` or `/ul`" lasts 5 s past the last stream.** A test has a
+  gap between its download and its upload, and a scheduled run that started
+  in it would overlap the upload. The server's metrics already count the
+  open streams, so they answer the question.
+
 ## Why
 
 - Tracker users type a hostname, not a URL. 3966 is dyno's port, so a bare

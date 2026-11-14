@@ -22,10 +22,26 @@ prototypes. This ADR settles only the API underneath. The contract is
   500 rows, and the connection is let go between pages. A client that stops
   reading an export can't stall stored results or the scheduler: the store
   uses a single connection, to keep SQLite's page cache to one (ADR-0006).
+  A page bounds the rows returned, not the rows scanned: a filter that
+  matches few rows, such as `outcome=failed`, can scan the whole history in
+  one statement. At dyno's volume (a run every 15 minutes is 35,000 rows a
+  year) that is milliseconds; if histories ever reach millions of rows, bound
+  each page by an id window too.
 - **Retention:** `keep_days`. The default is 0, which keeps everything; the
   range is 1 to 36,500 days. Results older than that are deleted, failed runs
   included. Deletion runs at start, every hour, and at once when `keep_days`
-  changes.
+  changes. A deletion that removed rows logs one `results.prune` event
+  (ADR-0020) at `INFO`, with `deleted_results`, `keep_days` and
+  `duration_ms`. One that fails logs it at `ERROR`, because the database
+  refused it, with `error.code` `store_read_failed` when `keep_days` can't
+  be read and `store_delete_failed` when the delete fails; a failed delete
+  also carries `deleted_results`, the rows it removed before it failed. One
+  that found nothing to delete logs nothing. The delete goes in batches of
+  500 and stops between batches once shutdown starts (or the `PATCH` that
+  started it hangs up): it logs `result` `canceled` with `deleted_results` so
+  far, or nothing when it deleted nothing, and the next prune finishes the
+  backlog. A `PATCH` whose prune shutdown stopped still answers 200 with the
+  saved settings, within the grace period.
 - **Server settings live at `GET` and `PATCH /api/v1/settings`:**
   `plan_down_mbps`, `plan_up_mbps` and `keep_days`. A `PATCH` changes only the
   fields it sends. An older client that doesn't know a newer field can't

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,6 +29,9 @@ import (
 	"github.com/redlinelabs-dev/dyno/server/internal/measure"
 	"github.com/redlinelabs-dev/dyno/server/internal/metrics"
 	"github.com/redlinelabs-dev/dyno/server/internal/netcap"
+	"github.com/redlinelabs-dev/dyno/server/internal/nodetest"
+	"github.com/redlinelabs-dev/dyno/server/internal/retention"
+	"github.com/redlinelabs-dev/dyno/server/internal/scheduler"
 	"github.com/redlinelabs-dev/dyno/server/internal/store"
 	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 	"github.com/redlinelabs-dev/dyno/server/internal/webui"
@@ -135,8 +139,36 @@ func run(ctx context.Context, cfg config, log *slog.Logger, ready func(addr, met
 	}
 	defer st.Close()
 
+	// The scheduler and the retention job run under bg, which run cancels
+	// on every path. Both have returned before server.stop is logged, so no
+	// line follows it; this defer, registered after st.Close's and so run
+	// first, is the same guarantee for a path that returns before that.
+	bg, stopBg := context.WithCancel(context.Background())
+	var bgDone sync.WaitGroup
+	defer func() {
+		stopBg()
+		bgDone.Wait()
+	}()
+
 	m := metrics.New(version)
-	srv := newServer(version, stallTimeout, st, m, log)
+	sched := &scheduler.Scheduler{
+		Store:   st,
+		Test:    nodetest.Run,
+		Version: version,
+		Busy:    m.Serving,
+		Metrics: m,
+		Log:     log,
+	}
+	srv := newServerWith(version, stallTimeout, st, m, log, scheduling{sched: sched, check: endsWith(bg, checkFarEnd), stop: bg})
+	bgDone.Add(2)
+	go func() {
+		defer bgDone.Done()
+		sched.Run(bg)
+	}()
+	go func() {
+		defer bgDone.Done()
+		retention.Run(bg, st, log)
+	}()
 	servers := []*http.Server{srv}
 	errc := make(chan error, 2)
 	go func() { errc <- srv.Serve(netcap.Limit(ln, maxConns)) }()
@@ -165,6 +197,8 @@ func run(ctx context.Context, cfg config, log *slog.Logger, ready func(addr, met
 	select {
 	case <-ctx.Done():
 	case err := <-errc: // Serve returns before Shutdown only when it fails
+		stopBg()
+		bgDone.Wait()
 		for _, s := range servers {
 			s.Close()
 		}
@@ -176,6 +210,11 @@ func run(ctx context.Context, cfg config, log *slog.Logger, ready func(addr, met
 		return err
 	}
 
+	// A scheduled run is stopped first so it can't hold the grace period, and
+	// the background goroutines are waited for before server.stop is logged, so
+	// no line of theirs comes after it.
+	stopBg()
+	bgDone.Wait()
 	sctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	var shutdownErr error
@@ -198,15 +237,46 @@ func run(ctx context.Context, cfg config, log *slog.Logger, ready func(addr, met
 	return nil
 }
 
-// newServer builds the main listener's server. m and log may be nil.
+// scheduling is what the API needs to run schedules. The zero value leaves
+// the schedule endpoints answering 503, as a server with no scheduler does.
+type scheduling struct {
+	sched api.Scheduler
+	check func(ctx context.Context, farEnd string) (nodetest.FarEndInfo, error)
+	stop  context.Context // done once the server begins stopping (nil: never)
+}
+
+// checkFarEnd reads farEnd's plan without running a test (ADR-0028).
+func checkFarEnd(ctx context.Context, farEnd string) (nodetest.FarEndInfo, error) {
+	return nodetest.Check(ctx, nodetest.Options{FarEnd: farEnd})
+}
+
+// endsWith is check with its context also cancelled once stop is done, so a
+// check waiting on a far end that never answers ends when shutdown starts, and
+// the handler can answer within the grace period.
+func endsWith(stop context.Context, check func(context.Context, string) (nodetest.FarEndInfo, error)) func(context.Context, string) (nodetest.FarEndInfo, error) {
+	return func(ctx context.Context, farEnd string) (nodetest.FarEndInfo, error) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		defer context.AfterFunc(stop, cancel)()
+		return check(ctx, farEnd)
+	}
+}
+
+// newServer builds the main listener's server with no scheduler and no
+// far-end check. m and log may be nil.
 func newServer(version string, stall time.Duration, st *store.Store, m *metrics.Metrics, log *slog.Logger) *http.Server {
+	return newServerWith(version, stall, st, m, log, scheduling{})
+}
+
+// newServerWith is newServer plus the scheduler and the far-end check.
+func newServerWith(version string, stall time.Duration, st *store.Store, m *metrics.Metrics, log *slog.Logger, sc scheduling) *http.Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	runs := testrun.NewRegistry()
 	mux := http.NewServeMux()
 	(&measure.Endpoints{Stall: stall, Runs: runs, Metrics: m}).Register(mux)
-	(&api.API{Version: version, Store: st, Runs: runs, Metrics: m, Log: log}).Register(mux)
+	(&api.API{Version: version, Store: st, Runs: runs, Metrics: m, Log: log, Scheduler: sc.sched, Check: sc.check, Stop: sc.stop}).Register(mux)
 	mux.Handle("GET /", webui.Handler())
 	return &http.Server{
 		Handler:           m.Instrument(mux),

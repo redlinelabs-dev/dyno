@@ -13,15 +13,26 @@ net/http's messages are logged at `WARN`.
 
 - **The message is a stable event name** in `domain.action` form:
   `server.start`, `server.stop`, `result.store`, `result.list`,
-  `result.get`. Never a sentence and never interpolated. A new event gets a
-  new name; a name doesn't change meaning.
+  `result.get`, and from M3 `result.export`, `schedule.list`,
+  `schedule.get`, `schedule.check`, `schedule.add`, `schedule.update`,
+  `schedule.delete`, `schedule.run_now`, `schedule.run` and
+  `schedule.load` (ADR-0028), `settings.get`, `settings.patch` and
+  `results.prune` (ADR-0030). Never a
+  sentence and never interpolated. A new event gets a new name; a name
+  doesn't change meaning.
 - **Keys are flat snake_case with the unit in the name:**
   `download_bits_per_second`, `loaded_latency_ms`, `duration_ms`,
   `size_bytes`. Values are primitives: strings, numbers, booleans. No
   `slog.Group`, no structs, no maps. The one namespace is `error.`: the
-  flat keys `error.code` and `error.message`.
+  flat keys `error.code` and `error.message`, and `error.stack` on a
+  scheduled run that panicked (ADR-0028), the one place a panic is
+  recovered.
 - **`result` is `succeeded` or `failed`** on every outcome event, so a
-  query can split on it without parsing anything else.
+  query can split on it without parsing anything else. Amended 2026-11-13:
+  a scheduled run stopped on purpose, by deleting its schedule or by
+  shutdown, is `canceled`, at `INFO` and with no `error.` keys, since nobody
+  needs to act on it (ADR-0028). So is a `results.prune` that shutdown stopped
+  between batches (ADR-0030).
 - **Levels:** `INFO` for outcomes that went as planned. `WARN` for expected
   or recoverable failures: a client's bad input, a shutdown that cut off a
   running test. `ERROR` only for what the operator must act on: a listener
@@ -42,9 +53,49 @@ net/http's messages are logged at `WARN`.
   Speeds are in bits, as people quote them. `/metrics` exports the same
   speeds in bytes per second instead, because Prometheus base units are
   bytes and `promtool check metrics` flags bits.
-- **Reads log only when they fail.** `result.list` and `result.get` appear
-  when the database errors, not on every page load. A client's 400 or 404 on
-  a read isn't logged.
+- **Every other write also ends in exactly one outcome event** (amended
+  2026-11-14 for M3): `schedule.add`, `schedule.update`, `schedule.delete`,
+  `schedule.run_now` and `settings.patch`, on success and on every failure
+  path. dyno has no accounts (ADR-0008), so anyone who can reach it can
+  change its schedules or delete history through `keep_days`. The log is
+  the only record that it happened and when. Writes are rare, so this costs
+  little.
+  - **Levels:** success at `INFO`. A client's bad input, an unknown id, the
+    schedule limit, a failed far-end check, a `/run` too soon, and a `503`
+    at `WARN`. Every `500` at `ERROR`: a database failure, a check that
+    failed on this server's side, or a run now that failed inside the
+    scheduler.
+  - **Every event carries** `status_code` and `duration_ms`, and
+    `schedule_id` when the path holds a well-formed id (a positive integer),
+    found or not, an add saved a new one, or a `schedule.list` failed
+    reading one schedule's results (that schedule's id).
+  - **A success also says what changed.** `schedule.add` and
+    `schedule.update` carry the schedule's `far_end`, `kind`,
+    `every_minutes`, `offset_minutes` and `paused` after the change. Not its
+    `name`, which is free text. `settings.patch` carries each setting sent,
+    under its own name, with its new value.
+  - **Failure codes:**
+    - `invalid_json` for a body that isn't one JSON object of known fields
+      and types, and `body_too_large`;
+    - `invalid_schedule` and `invalid_settings` for values out of range,
+      and `invalid_id` for a path id that isn't an integer. An id of 0 or
+      below is `not_found`, like any id with no schedule;
+    - `not_found` and `schedule_limit`;
+    - the far end's own code when its check fails (`unreachable`,
+      `timeout`, `not_dyno`);
+    - `too_soon`, `checks_busy`, `checks_unavailable`, `scheduler_off` and
+      `shutting_down` (a far-end check cut off because the server is stopping);
+    - `store_read_failed`, `store_write_failed`, `check_failed` (a check
+      that failed on this server's side, not the far end's),
+      `result_encode_failed` (a stored result the list couldn't write as
+      JSON) and `run_failed`.
+- **Reads log only when they fail.** `result.list`, `result.get`,
+  `result.export`, `schedule.list`, `schedule.get`, `schedule.check` and
+  `settings.get` appear when the server fails, at `ERROR`, not on every page
+  load. A client's 400 or 404 on a read isn't logged, and a check that finds
+  the far end down is the answer, not a failure. A list or export that fails
+  after it started sending carries `sent_results`, and its `status_code` is
+  the `200` already sent.
 - **`server.start`** carries `version`, `listen_address`,
   `metrics_listen_address` (empty when metrics are off) and `data_dir`; it
   is also the `ERROR` event when startup fails. `server.stop` carries

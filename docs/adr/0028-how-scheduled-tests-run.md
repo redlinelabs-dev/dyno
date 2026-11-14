@@ -25,7 +25,8 @@ prototypes.
   - dyno clamps the far end's plan: at most 5 streams, at most 30 s per
     direction, and caps on sizes, samples and intervals;
   - it follows no redirects;
-  - a reply that isn't dyno's ends the run.
+  - a reply that isn't dyno's ends the run, and so does a plan over 64 KiB
+    (`not_dyno`): dyno's own plan is a few hundred bytes.
 - **A failed run is stored**, with a code that points at an end:
   - `unreachable`, `timeout`, `not_dyno`, `http_status` or `stream_failed`;
   - and a plain sentence for the reason.
@@ -45,6 +46,33 @@ prototypes.
 - **Limits:** at most 16 schedules, each at least 15 minutes apart, and one
   scheduled test running at a time. A schedule that comes due while another
   runs waits its turn.
+- **Each finished run logs one `schedule.run` event** (ADR-0020) with
+  `result`, `schedule_id`, `kind` and `duration_ms`:
+  - a success is `succeeded`, at `INFO`;
+  - a failure is `failed` with `error.code` and `error.message`: at `WARN`
+    for a far-end code, which says something about the network, and at
+    `ERROR` for `internal`, which is a bug;
+  - a run stopped by a delete or a shutdown is `canceled`, at `INFO`, and
+    stores nothing.
+
+  Amended 2026-11-14, from building the scheduler:
+  - a result the database won't store is `failed` with `store_write_failed`,
+    at `ERROR`, and isn't counted in `/metrics`, so the metrics match the
+    database;
+  - a run that panics is stored as `internal`, and its event adds
+    `error.stack`, cut to 4 KiB. An `internal` message is cut to 240 bytes
+    of text without control characters, since a panic can quote anything
+    and the message is shown in the UI;
+  - a run that returns after its 5 minutes is a `timeout`, even a success,
+    whose figures are dropped;
+  - schedules that can't be read (at start, after a change, or for run now)
+    log `schedule.load` at `ERROR` with `store_read_failed`. The scheduler
+    tries again within 30 s, so an edit isn't lost silently.
+- **The scheduler wakes at least once a minute**, even with nothing due.
+  Go's timers don't count time the host spends suspended, so a laptop or VM
+  that sleeps would otherwise run its schedules late by as long as it slept.
+  A clock set back is noticed too: a next run more than one interval away is
+  worked out again.
 
 ## Why
 

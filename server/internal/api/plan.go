@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
+	"sync/atomic"
 
 	"github.com/redlinelabs-dev/dyno/server/internal/metrics"
 	"github.com/redlinelabs-dev/dyno/server/internal/nodetest"
@@ -94,7 +96,8 @@ func NewPlan(version, testID string) Plan {
 // results. Log is where events go (ADR-0020); nil means slog.Default().
 // Scheduler runs schedules; nil means schedules are kept but never run, and
 // asking for a run is 503. Check reads a far end's plan before a schedule
-// saves it (nodetest.Check in production); adding a schedule needs it.
+// saves it (nodetest.Check in production); adding a schedule needs it. Stop
+// ends a settings PATCH's prune between batches once the server is stopping.
 type API struct {
 	Version   string
 	Store     *store.Store
@@ -103,6 +106,11 @@ type API struct {
 	Log       *slog.Logger
 	Scheduler Scheduler
 	Check     func(ctx context.Context, farEnd string) (nodetest.FarEndInfo, error)
+	Stop      context.Context // done once the server begins stopping; ends a PATCH's prune between batches (nil: never)
+
+	// The zero values work: callers build an API as a struct literal.
+	checks  atomic.Int32 // far-end checks running now, at most maxChecks
+	patchMu sync.Mutex   // one PATCH of a schedule merges and saves at a time
 }
 
 func (a *API) log() *slog.Logger {
