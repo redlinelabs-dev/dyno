@@ -30,15 +30,17 @@ behind progressive disclosure. Private repo, solo developer.
 | `bench/` | Reproducible runtime benchmark (`bench/README.md`). Also the base for footprint regression checks. |
 | `prototypes/` | Standalone HTML prototypes. Reference only, never imported. |
 
-`server/` and `web/` don't exist yet; the roadmap's first milestone creates
-them. Follow ADR-0002 for layout and the API contract.
+`web/` doesn't exist yet; M2 creates it, and its build replaces
+`server/internal/webui/dist/`. Follow ADR-0002 for layout. The API contract
+is `docs/api.md`; keep it in step with the code. Server defaults and caps are
+ADR-0007.
 
 ## Rules that are easy to miss
 
 - **Footprint is a feature.** Every change to the server keeps idle RSS,
   RSS under load, CPU per GB and the soak slope within the budgets in
-  ADR-0006. Measure with `bench/`, report the numbers in the PR, and treat
-  a regression as a bug.
+  ADR-0006. Measure with `make bench`, paste its table into the PR, and
+  treat a regression as a bug.
 - **The web UI is just another API client.** It uses only the public HTTP API
   a native app would use (ADR-0002). Server-rendered state or UI-only
   endpoints break the future mobile app.
@@ -62,7 +64,17 @@ them. Follow ADR-0002 for layout and the API contract.
 
 TypeScript scripts run directly with Bun (`bun scripts/x.ts`), using Bun's own
 APIs. Python is not used here. Go is the server language. Build and test
-commands go in a root `Makefile` once milestone 1 lands; list them here then.
+from the root `Makefile` (it finds Go in `~/.local/go` itself):
+
+| Command | What |
+|---|---|
+| `make build` | Static server binary at `bin/dyno` |
+| `make check` | gofmt, go vet, `go test -race`, quick footprint check (~1.5 min). Run before every commit. |
+| `make bench` | Full footprint check with the 12-minute soak (~15 min); records to `bench/results/dyno-footprint.jsonl` |
+| `make image` / `make image-multiarch` | Container image; needs Docker, so not on this machine |
+
+Run the server locally with `bin/dyno` (listens on :3966, `DYNO_LISTEN` to
+change).
 
 This machine is a headless Debian box. Toolchains are user-local: Go in
 `~/.local/go` (not on PATH; use `~/.local/go/bin/go`). Zig and Rust are

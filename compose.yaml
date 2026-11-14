@@ -1,0 +1,8 @@
+# dyno: run `docker compose up -d`, then open http://<this-host>:3966
+services:
+  dyno:
+    build: .                # M4 swaps this for the published image
+    network_mode: host      # no NAT or userland proxy in the measured path (ADR-0003)
+    restart: unless-stopped
+    # environment:
+    #   DYNO_LISTEN: ":3966"  # address and port to listen on

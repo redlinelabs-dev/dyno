@@ -7,7 +7,19 @@ grade, latency under load, speed over time, scheduled tests and history.
 It's designed to idle in under 16 MiB of memory and ship as one static binary
 in one container.
 
-Status: research and UI prototypes. No server code yet. See `docs/ROADMAP.md`.
+Status: M1 walking skeleton. The server runs the measurement endpoints and
+the test-plan API; the real UI arrives in M2. See `docs/ROADMAP.md`.
+
+## Running it
+
+```sh
+docker compose up -d     # then open http://<this-host>:3966
+```
+
+Or without Docker: `make build && bin/dyno`. The API is in `docs/api.md`.
+
+The compose file uses host networking. On Docker Desktop (macOS, Windows),
+turn on host networking in Settings, Resources, Network first (4.34 or later).
 
 ## Where things are
 
@@ -18,6 +30,8 @@ Status: research and UI prototypes. No server code yet. See `docs/ROADMAP.md`.
 | `docs/adr/` | Settled decisions: runtime, architecture, measurement |
 | `docs/research/` | Market and demand, measurement methodology, runtime benchmark |
 | `prototypes/` | Interactive UI prototypes; open the HTML files in a browser |
+| `server/` | The Go server |
+| `scripts/footprint.ts` | The footprint check behind `make check` and `make bench` |
 | `bench/` | Reproducible runtime benchmark (Rust, Go, Zig, Bun) |
 
 ## Starting a build session

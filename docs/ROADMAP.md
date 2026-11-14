@@ -9,7 +9,7 @@ Before starting one, ask the owner the decisions-pending items listed under
 Brief, three research docs, a runtime benchmark, two rounds of UI prototypes,
 the combined pick (`prototypes/dyno-ui.html`) and ADRs 0001–0006.
 
-## M1. Walking skeleton
+## M1. Walking skeleton (built 2026-10-30; image build not yet run)
 
 Needs: nothing open. Runtime and budgets: ADR-0006.
 
@@ -36,6 +36,8 @@ Needs: #9 (auth default), #11 (branding). UI direction: ADR-0004.
   jitter, bufferbloat grade, and the client-CPU-limited label.
 - The telemetry layer: latency detail, speed over time, setup, history.
 - Results stored in SQLite and listed through the API. JSON copy works.
+- Re-measure idle RSS once SQLite is in and make ADR-0006's one budget
+  adjustment with the numbers (M1 left about 1 MiB of headroom; ADR-0007).
 
 Done when a full test runs from Chrome and Safari on a phone and a desktop
 against the container, the numbers agree with `iperf3` on the same LAN path
