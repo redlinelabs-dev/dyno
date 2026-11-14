@@ -11,9 +11,13 @@ on:
 permissions:
   contents: read
 
+# Every job has a timeout, generous next to what it takes: the default is six
+# hours, and a hung step would hold the runner for all of them. Every curl has
+# a --max-time for the same reason.
 jobs:
   check:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -33,9 +37,29 @@ jobs:
           shellcheck --shell=sh --severity=warning install/*.sh
       - name: release files build
         run: make release
+      # install.sh has to parse the SHA256SUMS that make release really writes,
+      # not one a test wrote by hand.
+      - name: release files install
+        run: |
+          set -eu
+          code=0
+          out=$(DYNO_ROOT="$RUNNER_TEMP/root" SYSTEMCTL=true DYNO_BASE_URL="file://$PWD/dist" sh dist/install.sh 2>&1) || code=$?
+          echo "$out"
+          if [ "$code" != 0 ]; then
+            printf 'exit status of dist/install.sh\n  expected: 0\n  got:      %s\n' "$code"
+            exit 1
+          fi
+          case $out in
+            *"dyno: installed "*) ;;
+            *)
+              printf 'output of dist/install.sh\n  expected: a line "dyno: installed <version>"\n  got:      the output above\n'
+              exit 1
+              ;;
+          esac
 
   image:
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -57,10 +81,10 @@ jobs:
         run: |
           mkdir /tmp/fresh && cp compose.yaml /tmp/fresh/ && cd /tmp/fresh
           docker compose up -d --wait --wait-timeout 60
-          curl -fsS -o /dev/null http://127.0.0.1:3966/
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3966/ping)" = 204
-          curl -fsS -o /dev/null "http://127.0.0.1:3966/dl?bytes=10485760"
-          curl -fsS http://127.0.0.1:3966/api/v1/plan
+          curl -fsS --max-time 10 -o /dev/null http://127.0.0.1:3966/
+          test "$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:3966/ping)" = 204
+          curl -fsS --max-time 60 -o /dev/null "http://127.0.0.1:3966/dl?bytes=10485760"
+          curl -fsS --max-time 10 http://127.0.0.1:3966/api/v1/plan
           docker compose ps
           docker stats --no-stream
           docker compose down
@@ -70,7 +94,7 @@ jobs:
         run: |
           cd /tmp/fresh
           docker compose up -d --wait --wait-timeout 60
-          curl -fsS -o /dev/null -H 'Content-Type: application/json' \
+          curl -fsS --max-time 10 -o /dev/null -H 'Content-Type: application/json' \
             -d '{"client":"ci-backup-check","download_mbps":100}' http://127.0.0.1:3966/api/v1/results
           docker compose stop
           cmd=$(grep '^docker run --rm' "$GITHUB_WORKSPACE/docs/install/docker.md")
@@ -79,8 +103,20 @@ jobs:
           sh -c "$cmd"
           ls -l
           test -s dyno.db
-          # The result posted above is in the copy, not only the empty schema.
-          grep -aq ci-backup-check dyno.db*
+          # Stopping dyno wrote the result posted above into dyno.db itself
+          # (docker.md: "Stopping dyno writes them into the database"). So the
+          # copy is that one file, with no -wal or -shm beside it, and the
+          # result is in it, not only the empty schema. A grep over dyno.db*
+          # would also find the result in a side file.
+          files=$(ls dyno.db*)
+          if [ "$files" != dyno.db ]; then
+            printf 'files in the backup\n  expected: dyno.db\n  got:      %s\n' "$files"
+            exit 1
+          fi
+          if ! grep -aq ci-backup-check dyno.db; then
+            printf 'dyno.db in the backup\n  expected: the result this step posted (client ci-backup-check)\n  got:      no such client in the file\n'
+            exit 1
+          fi
           cd /tmp/fresh
           docker compose down -v
       - name: docker run one-liner from docker.md
@@ -89,20 +125,22 @@ jobs:
           echo "$cmd"
           sh -c "$cmd"
           i=0
-          until [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3966/ping)" = 204 ]; do
+          until [ "$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:3966/ping)" = 204 ]; do
             i=$((i + 1))
             [ "$i" -lt 30 ] || { docker logs dyno; exit 1; }
             sleep 1
           done
-          curl -fsS http://127.0.0.1:3966/api/v1/plan
+          curl -fsS --max-time 10 http://127.0.0.1:3966/api/v1/plan
           docker rm -f dyno
           docker volume rm dyno-data
 
   # make check runs install.sh against a stand-in systemctl. Here it runs on a
-  # real systemd, where the unit's sandboxing (DynamicUser, no capabilities)
-  # takes effect.
+  # real systemd, where the unit's sandboxing (DynamicUser, no capabilities, a
+  # read-only system, a syscall filter) takes effect. A step that asserts
+  # prints what it expected and what it got.
   systemd:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -117,17 +155,34 @@ jobs:
       - run: make build
       - name: install.sh starts a non-root service
         run: |
+          set -eu
+          eq() { [ "$2" = "$3" ] || { printf '%s\n  expected: %s\n  got:      %s\n' "$1" "$2" "$3"; exit 1; }; }
+          # sudo for every file test here: /var/lib/private is root-only, and
+          # a plain test calls a file it can't reach missing.
+          present() { sudo test "$1" "$2" || { printf '%s\n  expected: test %s is true\n  got:      %s\n' "$2" "$1" "$(sudo ls -ld "$2" 2>&1)"; exit 1; }; }
           sudo DYNO_BINARY="$PWD/bin/dyno" sh install/install.sh
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3966/ping)" = 204
-          curl -fsS http://127.0.0.1:3966/api/v1/plan
+          base=http://127.0.0.1:3966
+          eq "GET /ping status" 204 "$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$base/ping")"
+          curl -fsS --max-time 10 "$base/api/v1/plan"
+          # Bytes move and the database is written under the unit's syscall
+          # filter and read-only system, not only /ping and the plan.
+          eq "GET /dl?bytes=10485760 body size" 10485760 "$(curl -fsS --max-time 60 "$base/dl?bytes=10485760" | wc -c)"
+          eq "POST /api/v1/results status" 201 "$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"client":"ci-systemd-check","download_mbps":100}' "$base/api/v1/results")"
           pid=$(systemctl show -p MainPID --value dyno)
           user=$(ps -o user= -p "$pid")
           echo "dyno runs as $user (pid $pid)"
-          test -n "$user"
-          test "$user" != root
-          # sudo for every file test here: /var/lib/private is root-only, and
-          # a plain test calls a file it can't reach missing.
-          sudo test -f /var/lib/dyno/dyno.db
+          case $user in
+            "" | root)
+              printf 'user of the dyno process\n  expected: a name other than root\n  got:      "%s"\n' "$user"
+              exit 1
+              ;;
+          esac
+          # debian.md: "no capabilities", and no way to gain any.
+          proc() { sudo awk -v k="$1:" '$1 == k { print $2 }' "/proc/$pid/status"; }
+          eq "CapEff of the dyno process" 0000000000000000 "$(proc CapEff)"
+          eq "CapBnd of the dyno process" 0000000000000000 "$(proc CapBnd)"
+          eq "NoNewPrivs of the dyno process" 1 "$(proc NoNewPrivs)"
+          present -f /var/lib/dyno/dyno.db
       - name: install.sh again reinstalls and keeps settings
         run: |
           sudo cp /etc/dyno/dyno.env "$RUNNER_TEMP/dyno.env"
@@ -135,6 +190,39 @@ jobs:
           echo "$out"
           echo "$out" | grep -q reinstalled
           sudo cmp /etc/dyno/dyno.env "$RUNNER_TEMP/dyno.env"
+      # debian.md: the service has no capabilities, so it can't bind a port below
+      # 1024, and with DYNO_LISTEN=:80 and no drop-in the install has to end
+      # unanswered. Without this, the next step would also pass on a runner that
+      # lets unprivileged processes bind port 80. On a runner that does
+      # (net.ipv4.ip_unprivileged_port_start at 80 or lower) this step would
+      # fail instead, so it first sets that to the usual 1024, for it and for
+      # the steps after it.
+      - name: port 80 without the drop-in is refused
+        run: |
+          set -eu
+          sudo sysctl -w net.ipv4.ip_unprivileged_port_start=1024
+          sudo cp /etc/dyno/dyno.env "$RUNNER_TEMP/dyno.env.before-80"
+          echo 'DYNO_LISTEN=:80' | sudo tee -a /etc/dyno/dyno.env >/dev/null
+          code=0
+          out=$(sudo DYNO_BINARY="$PWD/bin/dyno" sh install/install.sh 2>&1) || code=$?
+          echo "$out"
+          low=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start)
+          if [ "$code" = 0 ]; then
+            printf 'exit status of install.sh with DYNO_LISTEN=:80 and no drop-in\n  expected: not 0 (the service has no capability to bind :80)\n  got:      0 (net.ipv4.ip_unprivileged_port_start is %s)\n' "$low"
+            exit 1
+          fi
+          want="didn't answer within 10 s"
+          case $out in
+            *"$want"*) ;;
+            *)
+              printf 'output of install.sh with DYNO_LISTEN=:80 and no drop-in\n  expected: a line with "%s"\n  got:      the output above\n' "$want"
+              exit 1
+              ;;
+          esac
+          # Leave the service stopped and the settings as they were, for the next step.
+          sudo systemctl stop dyno
+          sudo systemctl reset-failed dyno || true
+          sudo cp "$RUNNER_TEMP/dyno.env.before-80" /etc/dyno/dyno.env
       # The recipe in docs/install/debian.md, with the drop-in written as a
       # file because systemctl edit opens an editor.
       - name: port 80 with the drop-in from debian.md
@@ -149,25 +237,83 @@ jobs:
           echo 'DYNO_LISTEN=:80' | sudo tee -a /etc/dyno/dyno.env >/dev/null
           sudo systemctl restart dyno
           i=0
-          until [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:80/ping)" = 204 ]; do
+          until [ "$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:80/ping)" = 204 ]; do
             i=$((i + 1))
             [ "$i" -lt 15 ] || { sudo journalctl -u dyno --no-pager -n 20; exit 1; }
             sleep 1
           done
+      # install.sh reads the port from dyno.env for its own health check and its
+      # link, so a re-run with dyno on :80 has to poll :80 and print a :80 link.
+      - name: install.sh again with dyno on port 80
+        run: |
+          set -eu
+          eq() { [ "$2" = "$3" ] || { printf '%s\n  expected: %s\n  got:      %s\n' "$1" "$2" "$3"; exit 1; }; }
+          code=0
+          out=$(sudo DYNO_BINARY="$PWD/bin/dyno" sh install/install.sh 2>&1) || code=$?
+          echo "$out"
+          eq "exit status of install.sh with dyno on :80" 0 "$code"
+          link=$(printf '%s\n' "$out" | sed -n 's/^dyno: running\. Open //p')
+          case $link in
+            http://*:80) ;;
+            *)
+              printf 'the link install.sh printed\n  expected: http://<host>:80\n  got:      "%s"\n' "$link"
+              exit 1
+              ;;
+          esac
+          eq "GET :80/ping status" 204 "$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:80/ping)"
+      # The recipe in docs/install/debian.md, run as the page prints it from a
+      # folder of its own: root reads /var/lib/dyno, the symlink DynamicUser
+      # leaves, while the service is stopped.
+      - name: back up as debian.md says
+        run: |
+          set -eu
+          eq() { [ "$2" = "$3" ] || { printf '%s\n  expected: %s\n  got:      %s\n' "$1" "$2" "$3"; exit 1; }; }
+          cmds=$(sed -n '/^sudo systemctl stop dyno/,/^sudo systemctl start dyno/p' "$GITHUB_WORKSPACE/docs/install/debian.md")
+          echo "$cmds"
+          eq "lines of the backup recipe in debian.md" 3 "$(printf '%s\n' "$cmds" | wc -l)"
+          mkdir "$RUNNER_TEMP/backup"
+          cd "$RUNNER_TEMP/backup"
+          sh -e -c "$cmds"
+          ls -l
+          # Stopping dyno wrote the result the first step posted into dyno.db
+          # itself (debian.md says so), so the copy is that file alone, and the
+          # result is in it. The copies belong to root, hence sudo.
+          eq "files in the backup" dyno.db "$(ls dyno.db*)"
+          if ! sudo grep -aq ci-systemd-check dyno.db; then
+            printf 'dyno.db in the backup\n  expected: the result the first step posted (client ci-systemd-check)\n  got:      no such client in the file\n'
+            exit 1
+          fi
       - name: uninstall keeps history and settings
         run: |
+          set -eu
+          present() { sudo test "$1" "$2" || { printf '%s\n  expected: test %s is true\n  got:      %s\n' "$2" "$1" "$(sudo ls -ld "$2" 2>&1)"; exit 1; }; }
+          absent() { sudo test ! -e "$1" || { printf '%s\n  expected: nothing there\n  got:      %s\n' "$1" "$(sudo ls -ld "$1" 2>&1)"; exit 1; }; }
           sudo sh install/install.sh --uninstall
-          sudo test ! -e /etc/systemd/system/dyno.service
-          test "$(systemctl is-active dyno)" != active
-          sudo test -f /etc/dyno/dyno.env
-          sudo test -f /var/lib/private/dyno/dyno.db
-          sudo test -d /etc/systemd/system/dyno.service.d
+          absent /etc/systemd/system/dyno.service
+          state=$(systemctl is-active dyno || true)
+          if [ "$state" = active ]; then
+            printf 'dyno after --uninstall\n  expected: not active\n  got:      %s\n' "$state"
+            exit 1
+          fi
+          present -f /etc/dyno/dyno.env
+          present -f /var/lib/private/dyno/dyno.db
+          present -d /etc/systemd/system/dyno.service.d
+          # The history is in the file the uninstall kept, not only an empty
+          # schema. Root expands the *: /var/lib/private is root-only.
+          if ! sudo sh -c 'grep -aq ci-systemd-check /var/lib/private/dyno/dyno.db*'; then
+            printf 'the data --uninstall kept\n  expected: the result the first step posted (client ci-systemd-check) in /var/lib/private/dyno/dyno.db*\n  got:      no such client\n'
+            exit 1
+          fi
       - name: purge removes everything
         run: |
           sudo sh install/install.sh --purge
-          for p in /usr/local/bin/dyno /etc/dyno /var/lib/private/dyno /etc/systemd/system/dyno.service.d; do
+          for p in /usr/local/bin/dyno /etc/dyno /var/lib/dyno /var/lib/private/dyno /etc/systemd/system/dyno.service.d; do
             sudo test ! -e "$p" || { echo "$p is still there"; exit 1; }
           done
+          # DynamicUser leaves /var/lib/dyno as a symlink to private/dyno. test -e
+          # follows a link and says no to one whose target is gone, so the loop
+          # lets a leftover link through: ask for the link itself.
+          sudo test ! -L /var/lib/dyno || { echo "/var/lib/dyno is still there: $(sudo ls -ld /var/lib/dyno 2>&1)"; exit 1; }
       - name: service log
         if: failure()
         run: sudo journalctl -u dyno --no-pager -n 50

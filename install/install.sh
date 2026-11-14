@@ -219,7 +219,7 @@ install_dyno() {
 	TMP=$(mktemp -d)
 	# Whichever way the run ends, no temp folder and no half-written dyno.new stay.
 	trap 'rm -rf "$TMP"; rm -f "$BIN.new"' EXIT
-	trap 'exit 1' INT TERM HUP # dash skips the EXIT trap when a signal kills it
+	trap 'exit 1' INT TERM HUP PIPE # dash skips the EXIT trap when a signal kills it, SIGPIPE included
 	get_binary
 	mkdir -p "$(dirname "$BIN")"
 	# The new binary is staged and tried in the install folder: a hardened host

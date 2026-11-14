@@ -127,17 +127,33 @@ fi
 
 TMP=$(mktemp -d)
 CREATED= # set once pct create has worked
-# On the way out the temp folder goes, and a failure after the create says the
-# container is still there, since nothing here removes it.
+KEY_PUSHED= # set while the Tailscale auth key may be in the container as a file
+
+# ct_rm FLAGS PATH deletes PATH inside the container. When that fails it warns
+# and goes on: the status the run exits with and the lines it ends on matter
+# more than a leftover.
+ct_rm() {
+	pct exec "$CTID" -- rm "$1" "$2" ||
+		printf "dyno: couldn't remove %s in container %s; remove it with: pct exec %s -- rm %s %s\n" "$2" "$CTID" "$CTID" "$1" "$2" >&2
+}
+
+# On the way out the temp folder goes, and so does the auth key if the run
+# ended while it may have been in the container: a signal, or a push that
+# failed part way. A failure after the create says the container is still
+# there, since nothing here removes it.
 cleanup() {
 	rc=$?
+	# A second signal (a double Ctrl-C) must not cut this short, nor kill the
+	# delete at a terminal: ignored here, it stays ignored in what this starts.
+	trap '' INT TERM HUP PIPE
 	rm -rf "$TMP"
+	[ -z "$KEY_PUSHED" ] || ct_rm -f /root/ts-authkey
 	if [ "$rc" -ne 0 ] && [ -n "$CREATED" ]; then
 		printf 'dyno: container %s was created and is still there; remove it with: pct stop %s; pct destroy %s\n' "$CTID" "$CTID" "$CTID" >&2
 	fi
 }
 trap cleanup EXIT
-trap 'exit 1' INT TERM HUP # dash skips the EXIT trap when a signal kills it
+trap 'exit 1' INT TERM HUP PIPE # dash skips the EXIT trap when a signal kills it, SIGPIPE included
 
 fetch() { curl -fsSL --retry 3 --connect-timeout 20 --max-time 600 -o "$2" "$1" || die "download failed: $1"; }
 
@@ -241,7 +257,7 @@ pct exec "$CTID" -- env DYNO_BINARY=/root/dyno-install/dyno \
 	DYNO_LISTEN="${DYNO_LISTEN:-}" DYNO_METRICS_LISTEN="${DYNO_METRICS_LISTEN:-}" \
 	sh /root/dyno-install/install.sh || status=$?
 # The pushed binary goes whether or not the install worked.
-pct exec "$CTID" -- rm -rf /root/dyno-install
+ct_rm -rf /root/dyno-install
 if [ $status -ne 0 ]; then
 	printf 'dyno: the install inside container %s failed (exit %s); its message is above. Fix that, then run: DYNO_CTID=%s sh proxmox-lxc.sh --upgrade\n' "$CTID" "$status" "$CTID" >&2
 	exit "$status"
@@ -254,10 +270,12 @@ if [ $MODE = create ] && [ "$TAILSCALE" = 1 ]; then
 	if [ -n "${TS_AUTHKEY:-}" ]; then
 		# The key goes in as a file: an argument would show in the process list.
 		printf '%s' "$TS_AUTHKEY" >"$TMP/ts-authkey"
+		KEY_PUSHED=1 # before the push: one that fails part way can leave the file
 		pct push "$CTID" "$TMP/ts-authkey" /root/ts-authkey --perms 0600
 		status=0
 		pct exec "$CTID" -- tailscale up --auth-key=file:/root/ts-authkey --hostname "$HOSTNAME_" || status=$?
-		pct exec "$CTID" -- rm -f /root/ts-authkey
+		ct_rm -f /root/ts-authkey
+		KEY_PUSHED= # gone, or warned about; the exit cleanup needn't try again
 		[ $status -eq 0 ] || exit "$status"
 	else
 		say "join the tailnet with: pct exec $CTID -- tailscale up --hostname $HOSTNAME_"

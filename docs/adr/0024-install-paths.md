@@ -15,8 +15,11 @@ and docker containers should be documented."
   `dyno-linux-arm64`, copies `install.sh` and `proxmox-lxc.sh`, and writes
   `SHA256SUMS` over all four. A pushed `v*` tag makes CI attach them to a
   GitHub release and push the image to `ghcr.io/redlinelabs-dev/dyno` with
-  tags `X.Y.Z`, `X.Y` and `latest`. Scripts download from
-  `releases/latest/download/`, so they need no version lookup.
+  tags `X.Y.Z`, `X.Y` and `latest`. A tag with a hyphen (`v0.2.0-rc.1`) makes
+  a GitHub prerelease and doesn't move `:latest`, so a release candidate
+  reaches neither the `releases/latest/download/` URLs nor anyone who tracks
+  `:latest`. Scripts download from `releases/latest/download/`, so they need
+  no version lookup.
 - **The installers are POSIX sh, not Bun.** A fresh host has `sh` and curl or
   wget, not Bun, and making people install a runtime to install a static
   binary would defeat the point. This is the one exception to the repo's

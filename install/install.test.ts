@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import {
   appendFileSync,
   chmodSync,
@@ -17,11 +17,23 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 
-// Each test runs the real script under /bin/sh with stubs for everything that would touch the host.
+// Each test runs the real script under dash with stubs for everything that would touch the host.
 // Test names start with their case id from install/cases.md.
 setDefaultTimeout(30_000);
+// For a test that runs a script many times in one body (the R3, R12, R16, R18 and R19 loops), so that a slow machine
+// doesn't push one past the default.
+const MANY_RUNS_MS = 120_000;
 
-const SH = Bun.which("sh") ?? "/bin/sh";
+// dash is the sh of Debian and Proxmox, where the scripts run. The signal tests (R7, R10, R15, R20) need it: when
+// a signal kills dash it skips the EXIT trap, so only there does a script without `trap 'exit 1' INT TERM HUP PIPE`
+// leave its temp folder behind. bash and busybox run the EXIT trap, so under them those tests pass without the trap line.
+const dash = Bun.which("dash");
+if (!dash) {
+  throw new Error(
+    "dash isn't on PATH. The installer tests run the scripts under dash, the sh of Debian and Proxmox (apt-get install dash); under another shell the signal tests can't fail.",
+  );
+}
+const SH = dash;
 const INSTALL = join(import.meta.dir, "install.sh");
 const PROXMOX = join(import.meta.dir, "proxmox-lxc.sh");
 const DOCS = join(import.meta.dir, "..", "docs", "install");
@@ -29,10 +41,11 @@ const REAL_CURL = Bun.which("curl");
 const VERSION = "v0.1.0-test";
 const RELEASES = "https://github.com/redlinelabs-dev/dyno/releases";
 
-// The only real tools a script gets. No curl, wget, systemctl or Proxmox commands: tests add stubs.
+// The only real tools a script gets. No curl, wget, systemctl or Proxmox commands: tests add stubs. Its sh is dash too.
 const TOOLS = mkdtempSync(join(tmpdir(), "dyno-tools-"));
+symlinkSync(SH, join(TOOLS, "sh"));
 for (const name of [
-  "sh", "cat", "cp", "mv", "rm", "mkdir", "mktemp", "chmod", "grep", "sed", "awk", "sort", "tail", "cut",
+  "cat", "cp", "mv", "rm", "mkdir", "mktemp", "chmod", "grep", "sed", "awk", "sort", "tail", "cut",
   "dirname", "basename", "sha256sum", "printf", "env", "tr", "head", "install", "ln", "ls", "wc", "touch",
   "rmdir", "readlink", "realpath", "tee", "uniq", "xargs", "find", "stat", "date", "cmp", "diff", "expr",
 ]) {
@@ -41,24 +54,40 @@ for (const name of [
 }
 afterAll(() => rmSync(TOOLS, { recursive: true, force: true }));
 
+// makeCtx adds each test's folder here, and they all go once the file is done. Bun runs a file's tests one after
+// another, so an afterEach would work as well: this is only a choice of when.
 const dirs: string[] = [];
-afterEach(() => {
+afterAll(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
 type Env = Record<string, string | undefined>;
 type Result = { code: number; stdout: string; stderr: string; out: string };
 
+// A script that hangs (a loop around the stubbed sleep spins) is killed after this long, so it can't outlive its test.
+const STUCK_MS = 20_000;
+
 // umask, when given, is what the script is started under.
 async function run(script: string, args: string[], env: Env, cwd: string, umask?: string): Promise<Result> {
   const clean = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined)) as Record<string, string>;
   const argv = umask ? [SH, "-c", `umask ${umask}; exec "$@"`, "sh", SH, script, ...args] : [SH, script, ...args];
-  const proc = Bun.spawn(argv, { env: clean, cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(argv, {
+    env: clean,
+    cwd,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: STUCK_MS,
+    killSignal: "SIGKILL",
+  });
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
+  if (proc.signalCode === "SIGKILL") {
+    throw new Error(`${basename(script)} was still running after ${STUCK_MS / 1000} s and was killed. Its last output:\n${(stdout + stderr).slice(-2000)}`);
+  }
   return { code, stdout, stderr, out: stdout + stderr };
 }
 
@@ -80,14 +109,18 @@ function put(path: string, content: string, mode = 0o644) {
   chmodSync(path, mode);
 }
 
-// Every file under dir with its mode, so "untouched" and "nothing installed" are one comparison.
-function snapshot(dir: string): Record<string, string> {
+// Every file under dir with its mode, so "untouched" and "nothing installed" are one comparison. With withDirs every
+// folder is listed too (name and a trailing slash), so an empty one made before a failure shows. A run that stops
+// after making usr/local/bin ahead of its copy (R10) leaves one legitimately, so only some tests ask for it.
+function snapshot(dir: string, withDirs = false): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (d: string) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const f = join(d, e.name);
-      if (e.isDirectory()) walk(f);
-      else if (e.isSymbolicLink()) out[relative(dir, f)] = `-> ${readlinkSync(f)}`;
+      if (e.isDirectory()) {
+        if (withDirs) out[`${relative(dir, f)}/`] = "dir";
+        walk(f);
+      } else if (e.isSymbolicLink()) out[relative(dir, f)] = `-> ${readlinkSync(f)}`;
       else out[relative(dir, f)] = `${readText(f)} [${(statSync(f).mode & 0o777).toString(8)}]`;
     }
   };
@@ -150,6 +183,12 @@ function makeRelease(dir: string, o: ReleaseOpts = {}) {
 // Stub bodies. @TOKENS@ are filled in per test; every stub logs one line per call.
 const systemctlStub = (failOn = "") =>
   `echo "systemctl $*" >> '@CALLS@'\n${failOn ? `[ "$1" = ${failOn} ] && exit 1\n` : ""}exit 0`;
+
+// A systemctl that also logs, on its own line after each call, whether the unit file is still there at that moment.
+const unitStateStub = (unit: string) =>
+  `echo "systemctl $*" >> '@CALLS@'
+if [ -e '${unit}' ]; then echo "[unit file there]" >> '@CALLS@'; else echo "[unit file gone]" >> '@CALLS@'; fi
+exit 0`;
 
 const idStub = (uid: number) =>
   `case "$1" in
@@ -228,7 +267,7 @@ function makeCtx() {
   const dir = mkdtempSync(join(tmpdir(), "dyno-inst-"));
   dirs.push(dir);
   const p = (...s: string[]) => join(dir, ...s);
-  for (const d of ["stubs", "tmp", "home", "release", "cwd", "ctr", "lxc", "state"]) mkdirSync(p(d));
+  for (const d of ["stubs", "tmp", "home", "release", "cwd", "ctr", "lxc", "state", "started"]) mkdirSync(p(d));
   writeFileSync(p("calls.log"), "");
   writeFileSync(p("pushes.tsv"), "");
 
@@ -239,7 +278,8 @@ function makeCtx() {
       .replaceAll("@RELEASE@", p("release"))
       .replaceAll("@STATE@", p("state"))
       .replaceAll("@CTR@", p("ctr"))
-      .replaceAll("@LXC@", p("lxc"));
+      .replaceAll("@LXC@", p("lxc"))
+      .replaceAll("@STARTED@", p("started"));
   const stub = (name: string, body: string) => put(p("stubs", name), `#!/bin/sh\n${fill(body)}\n`, 0o755);
   const base = (): Env => ({ PATH: `${p("stubs")}:${TOOLS}`, HOME: p("home"), TMPDIR: p("tmp"), LC_ALL: "C" });
 
@@ -393,11 +433,11 @@ test("I4 re-running with a newer binary upgrades it and rewrites the unit", asyn
 test("I5 checksum mismatch installs nothing", async () => {
   const c = installCtx({ badSum: ["dyno-linux-amd64"] });
   seedBinary(c.root, "v0.0.9-old");
-  const before = snapshot(c.root);
+  const before = snapshot(c.root, true);
   const r = await c.install();
   fails(r);
   expect(r.out).toMatch(/checksum mismatch/i);
-  expect(snapshot(c.root)).toEqual(before);
+  expect(snapshot(c.root, true)).toEqual(before);
   expect(systemctlCalls(c)).toEqual([]);
 });
 
@@ -407,7 +447,9 @@ test("I6 SHA256SUMS without a line for this arch installs nothing", async () => 
   fails(r);
   expect(r.out).toMatch(/SHA256SUMS/);
   expect(r.out).toMatch(/dyno-linux-amd64/);
-  expect(snapshot(c.root)).toEqual({});
+  // Both words are in other lines too (the "downloading" line, a failed download of SHA256SUMS): this is the script's own.
+  expect(r.stderr).toContain("SHA256SUMS has no entry for dyno-linux-amd64");
+  expect(snapshot(c.root, true)).toEqual({});
   expect(systemctlCalls(c)).toEqual([]);
 });
 
@@ -422,7 +464,7 @@ for (const row of [
     const r = await c.install();
     fails(r);
     expect(r.out).toMatch(/download failed/i);
-    expect(snapshot(c.root)).toEqual({});
+    expect(snapshot(c.root, true)).toEqual({});
     expect(systemctlCalls(c)).toEqual([]);
   });
 }
@@ -467,7 +509,7 @@ test("I11 neither curl nor wget fails and names curl", async () => {
   const r = await c.install();
   fails(r);
   expect(r.out).toMatch(/curl/i);
-  expect(snapshot(c.root)).toEqual({});
+  expect(snapshot(c.root, true)).toEqual({});
 });
 
 test("I12 DYNO_BINARY installs that file and downloads nothing", async () => {
@@ -487,7 +529,9 @@ test("I13 DYNO_BINARY pointing at nothing fails and installs nothing", async () 
   const r = await c.install([], { DYNO_BINARY: c.p("local", "nope") });
   fails(r);
   expect(r.out).toMatch(/no (such )?file|does(n'?t| not) exist|not found/i);
-  expect(snapshot(c.root)).toEqual({});
+  // That pattern also fits cp's "No such file or directory", which is what a script without its own check would say.
+  expect(r.stderr).toContain(`DYNO_BINARY: no file at ${c.p("local", "nope")}`);
+  expect(snapshot(c.root, true)).toEqual({});
   expect(systemctlCalls(c)).toEqual([]);
 });
 
@@ -534,12 +578,13 @@ test("I15 uname -m riscv64 fails and names the machine type", async () => {
   expect(systemctlCalls(c)).toEqual([]);
 });
 
-// I16 and I17 run without DYNO_ROOT. The release folder is empty, so a script that failed to stop
-// would die at the download instead of writing to the real system.
+// I16 and I17 run without DYNO_ROOT, so a script that failed to stop would write to the real system when the tests
+// run as root. DYNO_BASE_URL points at a folder that doesn't exist, so such a script dies at its first download
+// instead, whatever the release folder (empty here) ever holds.
 test("I16 a system that isn't Linux fails before anything is touched", async () => {
   const c = makeCtx();
   c.stub("uname", unameStub("Darwin", "arm64"));
-  const r = await c.install([], { DYNO_ROOT: undefined });
+  const r = await c.install([], { DYNO_ROOT: undefined, DYNO_BASE_URL: "file:///nonexistent" });
   fails(r);
   expect(r.out).toMatch(/linux/i);
   expect(c.calls()).toEqual([]);
@@ -550,7 +595,7 @@ test("I16 a system that isn't Linux fails before anything is touched", async () 
 test("I17 not root and no DYNO_ROOT says to run as root before anything is touched", async () => {
   const c = makeCtx();
   c.stub("id", idStub(1000));
-  const r = await c.install([], { DYNO_ROOT: undefined });
+  const r = await c.install([], { DYNO_ROOT: undefined, DYNO_BASE_URL: "file:///nonexistent" });
   fails(r);
   expect(r.out).toMatch(/root/i);
   expect(c.calls()).toEqual([]);
@@ -558,46 +603,78 @@ test("I17 not root and no DYNO_ROOT says to run as root before anything is touch
   expect(readdirSync(c.home)).toEqual([]);
 });
 
-// Each scenario runs to its end; afterwards no dyno.new and an empty TMPDIR.
-const finished: [string, () => Promise<Ctx>][] = [
-  ["a fresh install", async () => {
-    const c = installCtx();
-    await c.install();
-    return c;
-  }],
-  ["an upgrade", async () => {
-    const c = installCtx();
-    seedBinary(c.root, "v0.0.9-old");
-    await c.install();
-    return c;
-  }],
-  ["a checksum mismatch", async () => {
-    const c = installCtx({ badSum: ["dyno-linux-amd64"] });
-    seedBinary(c.root, "v0.0.9-old");
-    await c.install();
-    return c;
-  }],
-  ["a binary that can't run", async () => {
-    const c = installCtx({ binary: BROKEN_DYNO });
-    seedBinary(c.root, "v0.0.9-old");
-    await c.install();
-    return c;
-  }],
-  ["a failed download", async () => {
-    const c = installCtx({ missing: ["dyno-linux-amd64"] });
-    await c.install();
-    return c;
-  }],
-  ["a failed restart", async () => {
-    const c = installCtx();
-    c.stub("systemctl", systemctlStub("restart"));
-    await c.install();
-    return c;
-  }],
+// Each scenario runs to its end and says how it ended (an early exit would leave nothing behind either, so the test
+// checks the ending first); afterwards no dyno.new and an empty TMPDIR.
+const finished: [string, () => Promise<{ c: Ctx; r: Result }>, (r: Result, c: Ctx) => void][] = [
+  [
+    "a fresh install",
+    async () => {
+      const c = installCtx();
+      return { c, r: await c.install() };
+    },
+    (r) => succeeds(r),
+  ],
+  [
+    "an upgrade",
+    async () => {
+      const c = installCtx();
+      seedBinary(c.root, "v0.0.9-old");
+      return { c, r: await c.install() };
+    },
+    (r) => succeeds(r),
+  ],
+  [
+    "a checksum mismatch",
+    async () => {
+      const c = installCtx({ badSum: ["dyno-linux-amd64"] });
+      seedBinary(c.root, "v0.0.9-old");
+      return { c, r: await c.install() };
+    },
+    (r) => {
+      fails(r);
+      expect(r.stderr).toMatch(/checksum mismatch/);
+    },
+  ],
+  [
+    "a binary that can't run",
+    async () => {
+      const c = installCtx({ binary: BROKEN_DYNO });
+      seedBinary(c.root, "v0.0.9-old");
+      return { c, r: await c.install() };
+    },
+    (r) => {
+      fails(r);
+      expect(r.stderr).toMatch(/doesn't run/);
+    },
+  ],
+  [
+    "a failed download",
+    async () => {
+      const c = installCtx({ missing: ["dyno-linux-amd64"] });
+      return { c, r: await c.install() };
+    },
+    (r) => {
+      fails(r);
+      expect(r.stderr).toMatch(/download failed/);
+    },
+  ],
+  [
+    "a failed restart",
+    async () => {
+      const c = installCtx();
+      c.stub("systemctl", systemctlStub("restart"));
+      return { c, r: await c.install() };
+    },
+    (r, c) => {
+      fails(r);
+      expect(systemctlCalls(c)).toContain("systemctl restart dyno");
+    },
+  ],
 ];
-for (const [name, go] of finished) {
+for (const [name, go, ended] of finished) {
   test(`I18 leaves no dyno.new and no temp directory after ${name}`, async () => {
-    const c = await go();
+    const { c, r } = await go();
+    ended(r, c);
     const bindir = join(c.root, "usr/local/bin");
     expect((exists(bindir) ? readdirSync(bindir) : []).filter((f) => f.endsWith(".new"))).toEqual([]);
     expect(readdirSync(c.tmp)).toEqual([]);
@@ -641,12 +718,16 @@ test("I19 the unit carries the sandbox ADR-0024 lists", async () => {
 test("I20 a failing systemctl restart fails the install", async () => {
   const c = installCtx();
   c.stub("systemctl", systemctlStub("restart"));
-  fails(await c.install());
+  const r = await c.install();
+  fails(r);
+  expect(c.calls().at(-1)).toBe("systemctl restart dyno"); // it stopped at the restart, not somewhere earlier
+  expect(r.out).not.toMatch(/\b(installed|reinstalled|upgraded) v\d/);
 });
 
 test("I21 --uninstall removes the service and binary and keeps settings and data", async () => {
   const c = makeCtx();
   seedInstall(c.root);
+  c.stub("systemctl", unitStateStub(join(c.root, "etc/systemd/system/dyno.service")));
   const r = await c.install(["--uninstall"]);
   succeeds(r);
 
@@ -664,6 +745,12 @@ test("I21 --uninstall removes the service and binary and keeps settings and data
   expect(disable).toBeGreaterThanOrEqual(0);
   expect(stopped).toBe(true);
   expect(sc.indexOf("systemctl daemon-reload")).toBeGreaterThan(disable); // the unit is gone by then
+
+  // The order of two calls doesn't say that: the stub also logged whether the unit file was there at each call.
+  const calls = c.calls();
+  const next = (re: RegExp) => calls[calls.findIndex((l) => re.test(l)) + 1];
+  expect(next(/^systemctl disable\b.*\bdyno/)).toBe("[unit file there]");
+  expect(next(/^systemctl daemon-reload$/)).toBe("[unit file gone]");
 });
 
 test("I22 --purge also removes the settings and the data", async () => {
@@ -704,6 +791,9 @@ for (const flag of ["--help", "-h"]) {
     succeeds(r);
     expect(r.out).toContain("--uninstall");
     expect(r.out).toContain("--purge");
+    // The usage is a line range of the script's header: it has to reach the last setting and stop before the code.
+    expect(r.out).toContain("DYNO_METRICS_LISTEN");
+    expect(r.out).not.toContain("set -eu");
   });
 }
 
@@ -715,19 +805,27 @@ type PveOpts = {
   rootdir?: Row[]; // pvesm status -content rootdir
   vztmpl?: Row[]; // pvesm status -content vztmpl
   templates?: string[]; // pveam available --section system
-  have?: string[]; // pveam list <storage>
+  have?: string[]; // pveam list <storage>, for the first active vztmpl storage: pveam lists nothing for any other
   containers?: Record<string, "running" | "stopped">;
   tags?: string | null; // the tags line of those containers: "dyno" when unset, no tags line at all when null
   address?: string; // what the container answers to hostname -I
+  failUpdate?: boolean; // pveam update fails
 };
 
 const TUN_ALLOW = /^lxc\.cgroup2?\.devices\.allow:\s*c 10:200 rwm\s*$/gm;
 const TUN_MOUNT = /^lxc\.mount\.entry:\s*\/dev\/net\/tun\b.*$/gm;
 const TEMPLATE_13 = "debian-13-standard_13.10-1_amd64.tar.zst";
 const ADDRESS = "192.168.1.77";
+// What pvesm lists for any call but the two the script must make: an active storage, so a script that asks the wrong
+// question picks it, and the pct create line or the rootfs shows it.
+const DECOY: Row[] = [["decoy", "dir", "active"]];
 
 // Stand-ins for the Proxmox tools. pct keeps container state in files so status follows create/start,
-// copies pushed files into a per-test container folder, and only logs everything else.
+// keeps the container's config as it was when it started, copies pushed files into a per-test container folder
+// (which has a /root, as a real one does, and only the folders pct exec made: pct push doesn't make any), and only
+// logs everything else. pvesm and pveam answer only what the script is meant to ask: pvesm status -content rootdir
+// and -content vztmpl get their tables, any other pvesm call gets DECOY, and pveam list names the templates only for
+// the storage that holds them, so a call with other arguments or for another storage changes what the test sees.
 function pve(c: Ctx, o: PveOpts = {}) {
   const rootdir: Row[] = o.rootdir ?? [
     ["broken", "lvmthin", "disabled"],
@@ -753,20 +851,26 @@ function pve(c: Ctx, o: PveOpts = {}) {
     put(c.p("state", id), `${state}\n`);
     put(join(c.lxc, `${id}.conf`), `arch: amd64\n${tagsLine}`);
   }
+  mkdirSync(c.p("ctr", "root"), { recursive: true });
 
   const table = (rows: Row[]) =>
     rows.map(([n, t, s]) => `    echo '${n.padEnd(16)} ${t.padEnd(8)} ${s.padEnd(10)} 1000 100 900 10.00%'`).join("\n");
+  // The storage that holds the container templates, the one the script has to ask pveam list about.
+  const templateStore = vztmpl.find(([, , status]) => status === "active")?.[0] ?? "";
   c.stub("pvesh", `echo "pvesh $*" >> '@CALLS@'\ncase "$*" in\n  *nextid*) echo ${o.nextId ?? "105"};;\n  *) exit 1;;\nesac`);
   c.stub(
     "pvesm",
     `echo "pvesm $*" >> '@CALLS@'
 echo 'Name             Type     Status           Total            Used       Available        %'
 case "$*" in
-  *vztmpl*)
+  "status -content rootdir")
+${table(rootdir)}
+    ;;
+  "status -content vztmpl")
 ${table(vztmpl)}
     ;;
   *)
-${table(rootdir)}
+${table(DECOY)}
     ;;
 esac`,
   );
@@ -774,12 +878,15 @@ esac`,
     "pveam",
     `echo "pveam $*" >> '@CALLS@'
 case "$1" in
+  update)
+${o.failUpdate ? `    echo "update storage failed: 500 Internal Server Error" >&2; exit 255` : "    exit 0"}
+    ;;
   available)
 ${templates.map((t) => `    echo 'system          ${t}'`).join("\n")}
     ;;
   list)
     echo 'NAME                                       SIZE'
-${(o.have ?? []).map((t) => `    echo "$2:vztmpl/${t}    120.00MB"`).join("\n")}
+${(o.have ?? []).map((t) => `    [ "$2" = '${templateStore}' ] && echo "$2:vztmpl/${t}    120.00MB"`).join("\n")}
     ;;
 esac
 exit 0`,
@@ -814,6 +921,7 @@ case "$cmd" in
     exit 0
     ;;
   start|reboot)
+    [ -f '@LXC@'/"$1.conf" ] && cp '@LXC@'/"$1.conf" '@STARTED@'/"$1.conf"
     echo running > '@STATE@'/"$1"
     exit 0
     ;;
@@ -842,7 +950,7 @@ case "$cmd" in
       shift
     done
     [ -f "$src" ] || { echo "no such file: $src" >&2; exit 1; }
-    mkdir -p "@CTR@$(dirname "$dst")" || exit 1
+    [ -d "@CTR@$(dirname "$dst")" ] || { echo "$dst: No such file or directory" >&2; exit 1; }
     cp "$src" "@CTR@$dst" || exit 1
     chmod "$perms" "@CTR@$dst"
     printf '%s\\t%s\\t%s\\t%s\\n' "$id" "$src" "$dst" "$perms" >> '@PUSHES@'
@@ -855,6 +963,7 @@ case "$cmd" in
       "hostname -I") printf '%s \\n' '${address}' ;;
       *"hostname -I"*) printf '%s\\n' '${address}' ;;
     esac
+    [ "$1" = mkdir ] && [ "$2" = -p ] && mkdir -p "@CTR@$3"
     exit 0
     ;;
 esac
@@ -873,6 +982,8 @@ const opt = (line: string, name: string) => new RegExp(`--${name}[ =](\\S+)`).ex
 const MUTATING = ["create", "start", "stop", "push", "exec", "set", "destroy", "reboot", "shutdown"];
 const mutations = (calls: string[]) => calls.filter((l) => MUTATING.some((s) => l.startsWith(`pct ${s} `)));
 const createLine = (c: Ctx) => pct(c.calls(), "create")[0] ?? "";
+// Anything that reaches the network or Proxmox; a script that refuses its input must have made none.
+const hostCalls = (c: Ctx) => c.calls().filter((l) => /^(curl|wget|pct|pveam|pvesm)\b/.test(l));
 
 // The files an upgrade or install pushed: the fake binary and the release's install.sh.
 function pushed(c: Ctx, installMarker = "# release-marker") {
@@ -893,6 +1004,10 @@ function expectInstallRan(c: Ctx, id: string, installMarker = "# release-marker"
   const lastPush = calls.reduce((last, l, i) => (l.startsWith("pct push ") ? i : last), -1);
   if (at < 0) throw new Error(`install.sh was never run inside the container:\n${calls.join("\n")}`);
   expect(at).toBeGreaterThan(lastPush);
+  // pct push makes no folders, so the push folder is made first (the stub's push fails without it)
+  const made = calls.findIndex((l) => l === `pct exec ${id} -- mkdir -p ${dirname(bin.dst)}`);
+  expect(made).toBeGreaterThanOrEqual(0);
+  expect(made).toBeLessThan(calls.findIndex((l) => l.startsWith("pct push ")));
   expect(calls[at]).toMatch(new RegExp(`DYNO_BINARY=["']?${esc(bin.dst)}`));
   const rest = calls[at].slice(calls[at].lastIndexOf("install.sh")) + "\n" + calls.slice(at + 1).join("\n");
   expect(rest).toMatch(/\brm\b/);
@@ -922,6 +1037,13 @@ test("P1 creates the container with every default and installs dyno in it", asyn
   expect(opt(line, "onboot")).toBe("1");
   expect(opt(line, "net0")).toBe("name=eth0,bridge=vmbr0,ip=dhcp");
 
+  // Both storage questions were asked as Proxmox wants them: for any other pvesm call the stub lists a decoy storage,
+  // and it names the templates in pveam list only for the storage that holds them.
+  expect(calls.filter((l) => l.startsWith("pvesm ")).sort()).toEqual([
+    "pvesm status -content rootdir",
+    "pvesm status -content vztmpl",
+  ]);
+  expect(calls).toContain("pveam list local");
   expect(calls).toContain(`pveam download local ${TEMPLATE_13}`);
   expectInOrder(calls, [
     /^pveam download /,
@@ -941,6 +1063,8 @@ test("P1 creates the container with every default and installs dyno in it", asyn
 test("P1 a template already downloaded is not fetched again", async () => {
   const c = pveCtx({ have: [TEMPLATE_13] });
   succeeds(await c.proxmox());
+  // The stub lists the template only for the storage that holds templates, so the script has to have asked that one.
+  expect(c.calls()).toContain("pveam list local");
   expect(c.calls().some((l) => l.startsWith("pveam download"))).toBe(false);
   expect(createLine(c)).toMatch(new RegExp(`^pct create 105 local:vztmpl/${esc(TEMPLATE_13)}( |$)`));
 });
@@ -995,7 +1119,8 @@ test("P5 --upgrade without DYNO_CTID fails and changes nothing", async () => {
   const c = pveCtx({ containers: { "105": "running" } });
   const r = await c.proxmox(["--upgrade"]);
   fails(r);
-  expect(mutations(c.calls())).toEqual([]);
+  expect(r.stderr).toContain("DYNO_CTID"); // it stopped for that, not for something earlier
+  expect(c.calls()).toEqual([]); // no call at all: hostCalls leaves out pvesh, which only a nextid lookup would make
 });
 
 test("P6 --upgrade on a stopped container says it isn't running", async () => {
@@ -1094,6 +1219,11 @@ test("P12 DYNO_TAILSCALE=1 gives the container /dev/net/tun and installs Tailsca
   expect(execs.length).toBeGreaterThan(0);
   expect(execs.some((l) => /tailscale up/.test(l))).toBe(false); // without a key it only prints the command
   expect(r.out).toMatch(/tailscale up/);
+  // The lines have to be in the config when the container starts, or it has no /dev/net/tun until its next restart
+  // and tailscale up fails; the config after the run can't say that, the copy pct start made can.
+  const atStart = readText(c.p("started", "105.conf"));
+  expect(atStart.match(TUN_ALLOW)).toHaveLength(1);
+  expect(atStart.match(TUN_MOUNT)).toHaveLength(1);
 });
 
 test("P12 TS_AUTHKEY joins the tailnet with the container's hostname", async () => {
@@ -1131,6 +1261,7 @@ test("P15 not root fails without a pct call", async () => {
   c.stub("id", idStub(1000));
   const r = await c.proxmox();
   fails(r);
+  expect(r.stderr).toMatch(/run as root/);
   expect(c.calls().filter((l) => l.startsWith("pct "))).toEqual([]);
 });
 
@@ -1142,6 +1273,7 @@ for (const missing of [["pct", "pveam"], ["pct"], ["pveam"]]) {
     fails(r);
     expect(r.out).toContain("install.sh");
     expect(c.calls().filter((l) => l.startsWith("pct "))).toEqual([]);
+    expect(c.calls()).toEqual([]); // the pct filter above can't match when pct itself is the missing one
   });
 }
 
@@ -1156,6 +1288,9 @@ test("P17 --help exits 0 and mentions --upgrade", async () => {
   const r = await c.proxmox(["--help"]);
   succeeds(r);
   expect(r.out).toContain("--upgrade");
+  // The usage is a line range of the script's header: it has to reach the last setting and stop before the code.
+  expect(r.out).toContain("TS_AUTHKEY");
+  expect(r.out).not.toContain("set -eu");
 });
 
 test("P18 an unsupported uname -m fails before any pct call", async () => {
@@ -1163,7 +1298,65 @@ test("P18 an unsupported uname -m fails before any pct call", async () => {
   c.stub("uname", unameStub("Linux", "riscv64"));
   const r = await c.proxmox();
   fails(r);
+  expect(r.stderr).toContain("riscv64");
   expect(c.calls().filter((l) => l.startsWith("pct "))).toEqual([]);
+});
+
+// The twin of I15. Only what uname -m prints on Linux: x86_64 and aarch64, not the amd64 and arm64 install.sh also takes.
+for (const [machine, arch, other] of [
+  ["x86_64", "amd64", "arm64"],
+  ["aarch64", "arm64", "amd64"],
+]) {
+  test(`P18 uname -m ${machine} downloads dyno-linux-${arch} and pushes that binary`, async () => {
+    const c = pveCtx();
+    c.stub("uname", unameStub("Linux", machine));
+    succeeds(await c.proxmox());
+    const curls = c.calls().filter((l) => l.startsWith("curl "));
+    expect(curls.some((l) => l.includes(`dyno-linux-${arch}`))).toBe(true);
+    expect(curls.some((l) => l.includes(`dyno-linux-${other}`))).toBe(false);
+    expect(pushed(c).bin.content).toContain(`dyno-fake ${arch} `);
+  });
+}
+
+// P19 and P20: the URLs proxmox-lxc.sh builds itself. Every other test here points it at a file:// folder, so a wrong
+// repository or path would pass them all. This curl serves the release folder for any URL and the test reads the URLs.
+const urls = (c: Ctx) =>
+  c
+    .calls()
+    .filter((l) => l.startsWith("curl "))
+    .map((l) => l.slice(l.lastIndexOf(" ") + 1)) // the URL is the last argument of every logged call
+    .sort();
+
+test("P19 downloads SHA256SUMS, the binary and install.sh from the latest release by default", async () => {
+  const c = pveCtx();
+  c.stub("curl", CURL_MAP);
+  succeeds(await c.proxmox([], { DYNO_BASE_URL: undefined }));
+  expect(urls(c)).toEqual(["SHA256SUMS", "dyno-linux-amd64", "install.sh"].map((f) => `${RELEASES}/latest/download/${f}`).sort());
+});
+
+test("P20 DYNO_VERSION picks that release's files", async () => {
+  const c = pveCtx();
+  c.stub("curl", CURL_MAP);
+  succeeds(await c.proxmox([], { DYNO_BASE_URL: undefined, DYNO_VERSION: "v0.1.0" }));
+  expect(urls(c)).toEqual(["SHA256SUMS", "dyno-linux-amd64", "install.sh"].map((f) => `${RELEASES}/download/v0.1.0/${f}`).sort());
+});
+
+test("P21 no active storage for container templates fails before any template or container work", async () => {
+  const c = pveCtx({ vztmpl: [["nfs-off", "nfs", "disabled"], ["gone", "dir", "unknown"]] });
+  const r = await c.proxmox();
+  fails(r);
+  expect(r.stderr).toBe("dyno: no active storage holds container templates\n");
+  expect(c.calls().filter((l) => l.startsWith("pveam "))).toEqual([]);
+  expect(mutations(c.calls())).toEqual([]);
+});
+
+test("P22 a failing pveam update uses the cached template list, says so and goes on", async () => {
+  const c = pveCtx({ failUpdate: true });
+  const r = await c.proxmox();
+  succeeds(r);
+  expect(r.stdout).toContain("dyno: couldn't refresh the template list; using the cached one");
+  expect(c.calls()).toContain("pveam update");
+  expect(createLine(c)).toMatch(new RegExp(`^pct create 105 local:vztmpl/${esc(TEMPLATE_13)}( |$)`));
 });
 
 // ---- docs agree with the scripts ----
@@ -1192,8 +1385,10 @@ test("D2 the defaults the Proxmox doc's table states are what P1 observes", asyn
   };
   const hostname = cell("Hostname").replaceAll("`", "");
   const size = /(\d+) cores?, (\d+) MiB, (\d+) GiB/.exec(cell("CPU, memory, disk"));
+  const swap = /^(\d+) MiB$/.exec(cell("Swap"));
   const network = /`([^`]+)`, DHCP/.exec(cell("Network"));
   expect(size).not.toBeNull();
+  expect(swap).not.toBeNull();
   expect(network).not.toBeNull();
   expect(cell("Unprivileged, nesting on, start at boot")).toBe("always");
 
@@ -1203,6 +1398,7 @@ test("D2 the defaults the Proxmox doc's table states are what P1 observes", asyn
   expect(opt(line, "hostname")).toBe(hostname);
   expect(opt(line, "cores")).toBe(size![1]);
   expect(opt(line, "memory")).toBe(size![2]);
+  expect(opt(line, "swap")).toBe(swap![1]);
   expect(opt(line, "rootfs")).toMatch(new RegExp(`:${size![3]}$`));
   expect(opt(line, "net0")).toBe(`name=eth0,bridge=${network![1]},ip=dhcp`);
   expect(opt(line, "unprivileged")).toBe("1");
@@ -1211,9 +1407,6 @@ test("D2 the defaults the Proxmox doc's table states are what P1 observes", asyn
 });
 
 // ---- regressions R1 to R9 (cases.md, "Added after black-box round 1") ----
-
-// Anything that reaches the network or Proxmox; a script that refuses its input must have made none.
-const hostCalls = (c: Ctx) => c.calls().filter((l) => /^(curl|wget|pct|pveam|pvesm)\b/.test(l));
 
 // R1: every file proxmox-lxc.sh pushes needs a SHA256SUMS line of its own, or nothing is pushed.
 const missingLines: [string, ReleaseOpts, string][] = [
@@ -1313,7 +1506,7 @@ async function listenWrong(
       const c = installCtx();
       c.stub("touch", `echo "touch $*" >> '@CALLS@'`);
       const r = await c.install([], { [name]: value });
-      const untouched = c.calls().length === 0 && Object.keys(snapshot(c.root)).length === 0;
+      const untouched = c.calls().length === 0 && Object.keys(snapshot(c.root, true)).length === 0; // folders too
       right = refused ? r.code !== 0 && r.stderr === message && untouched : r.code === 0;
     } else {
       const c = pveCtx();
@@ -1328,11 +1521,11 @@ async function listenWrong(
 for (const name of ["DYNO_LISTEN", "DYNO_METRICS_LISTEN"]) {
   test(`R3 install.sh refuses a bad ${name} by name before anything is touched or run`, async () => {
     expect(await listenWrong("install.sh", name, BAD_LISTEN)).toEqual([]);
-  });
+  }, MANY_RUNS_MS);
 
   test(`R3 proxmox-lxc.sh refuses a bad ${name} by name before any download or pct call`, async () => {
     expect(await listenWrong("proxmox-lxc.sh", name, BAD_LISTEN)).toEqual([]);
-  });
+  }, MANY_RUNS_MS);
 }
 
 for (const [value, port] of [
@@ -1352,6 +1545,19 @@ for (const [value, port] of [
     expect(r.out).toMatch(new RegExp(`http://\\S+:${port}(?!\\d)`));
   });
 }
+
+// proxmox-lxc.sh passes both as empty strings on every create, so this is the normal Proxmox path: an empty value is
+// not set, and the file gets the commented defaults, not a setting with nothing after the equals sign.
+test("R3 a first install with DYNO_LISTEN and DYNO_METRICS_LISTEN empty writes both commented out and prints the default port", async () => {
+  const c = installCtx();
+  const r = await c.install([], { DYNO_LISTEN: "", DYNO_METRICS_LISTEN: "" });
+  succeeds(r);
+  const lines = readText(join(c.root, "etc/dyno/dyno.env")).split("\n");
+  expect(lines).toContain("#DYNO_LISTEN=:3966");
+  expect(lines).toContain("#DYNO_METRICS_LISTEN=127.0.0.1:3967");
+  expect(lines.filter((l) => /^\s*DYNO_(METRICS_)?LISTEN\s*=/.test(l))).toEqual([]); // not even an empty one
+  expect(r.out).toMatch(/http:\/\/\S+:3966$/m);
+});
 
 test("R3 proxmox-lxc.sh passes IPv6 listen addresses on and prints the port", async () => {
   const c = pveCtx();
@@ -1433,23 +1639,23 @@ for (const [mode, id] of [
   });
 }
 
-// pct whose calls that match the glob (their arguments, joined into one string) fail with the given status and message,
-// as an install that dies in the container does, or a start that Proxmox refuses. Every other call goes to the usual
-// stub. Call it once per test: it renames the stub it wraps.
-function failPct(c: Ctx, glob: string, status: number, message: string) {
+// pct whose calls that match a glob (their arguments, joined into one string) run the shell that goes with it instead.
+// Every other call goes to the usual stub, and a body can make that call itself with '@REAL@' "$@" (a push that lands its
+// file and then fails). Call it once per test: it renames the stub it wraps.
+function wrapPct(c: Ctx, arms: [glob: string, body: string][]) {
   const real = c.p("stubs", "pct-real");
   copyFileSync(c.p("stubs", "pct"), real);
   chmodSync(real, 0o755);
-  c.stub(
-    "pct",
-    `case "$*" in
-  ${glob})
-    echo "pct $*" >> '@CALLS@'
-    echo "${message}" >&2
-    exit ${status};;
-esac
-exec '${real}' "$@"`,
-  );
+  const cases = arms.map(([glob, body]) => `  ${glob})\n${body.replaceAll("@REAL@", real)}\n    ;;`).join("\n");
+  c.stub("pct", `case "$*" in\n${cases}\nesac\nexec '${real}' "$@"`);
+}
+
+// What such a call does when it fails, as an install that dies in the container does, or a start that Proxmox
+// refuses: it is logged, says its message on stderr and exits with its status.
+const failBody = (status: number, message: string) => `    echo "pct $*" >> '@CALLS@'\n    echo "${message}" >&2\n    exit ${status}`;
+
+function failPct(c: Ctx, glob: string, status: number, message: string) {
+  wrapPct(c, [[glob, failBody(status, message)]]);
 }
 
 // R5: the install inside the container fails.
@@ -1505,22 +1711,48 @@ test("R6 proxmox-lxc.sh gives every curl download a time limit, the Tailscale in
 });
 
 // R7: Ctrl-C, a kill or a dropped ssh session during a download. dash skips the EXIT trap for a signal that
-// kills it, so the temp directory used to stay. The stub signals the script it runs under, then dies.
-const curlSignals = (sig: string) => `echo "curl $*" >> '@CALLS@'\nkill -s ${sig} "$PPID"\nexit 130`;
+// kills it, so the temp directory used to stay. The stub signals the script it runs under, then exits 0 as if the
+// download had worked: only the script's own `trap 'exit 1'` stops the run before its next download, so a test that sees
+// exit 1 and one curl call proves the trap ran, where a stub that exits non-zero would end the run through die.
+const curlSignals = (sig: string) => `echo "curl $*" >> '@CALLS@'\nkill -s ${sig} "$PPID"\nexit 0`;
 
-for (const sig of ["INT", "TERM", "HUP"]) {
+for (const sig of ["INT", "TERM", "HUP", "PIPE"]) {
   for (const script of ["install.sh", "proxmox-lxc.sh"]) {
     test(`R7 ${script} stopped by SIG${sig} during a download removes its temp directory`, async () => {
       const c = script === "install.sh" ? installCtx() : pveCtx();
       c.stub("curl", curlSignals(sig));
       const r = await (script === "install.sh" ? c.install() : c.proxmox());
-      fails(r);
+      expect(r.code).toBe(1); // the trap's exit, not the stub's: it exited 0
+      // The download began, so the signal was sent, and it was the only one: a script that ignored the signal would
+      // go on to its next download.
+      expect(c.calls().filter((l) => l.startsWith("curl "))).toHaveLength(1);
       expect(readdirSync(c.tmp)).toEqual([]);
       expect(snapshot(c.root)).toEqual({});
       expect(mutations(c.calls())).toEqual([]);
     });
   }
 }
+
+// R7, SIGPIPE: an ssh session with no tty that drops sends no HUP; the script's next write takes SIGPIPE, which dash
+// treats like any other killing signal. The stub sends it to the script, as the tests above do, from the calls that follow
+// the temp folder: install.sh's first systemctl call and proxmox-lxc.sh's pct create (later calls: R20).
+test("R7 proxmox-lxc.sh stopped by SIGPIPE during pct create removes its temp directory", async () => {
+  const c = pveCtx();
+  wrapPct(c, [["create*", signalBody("PIPE")]]);
+  const r = await c.proxmox();
+  expect(r.code).toBe(1);
+  expect(c.calls()).toContain("signalled SIGPIPE"); // pct create ran and the signal was sent
+  expect(readdirSync(c.tmp)).toEqual([]);
+});
+
+test("R7 install.sh stopped by SIGPIPE at its first systemctl call removes its temp directory", async () => {
+  const c = installCtx();
+  c.stub("systemctl", `echo "systemctl $*" >> '@CALLS@'\nkill -s PIPE "$PPID"\nexit 130`);
+  const r = await c.install();
+  expect(r.code).toBe(1);
+  expect(c.calls().some((l) => l.startsWith("systemctl "))).toBe(true); // the install got that far, so the signal was sent
+  expect(readdirSync(c.tmp)).toEqual([]);
+});
 
 // R8: the link has to work, so an IPv4 address beats an IPv6 one and a bare IPv6 address gets brackets.
 const hostnameStub = (out: string) => `case "$1" in\n  -I) printf '%s\\n' '${out}';;\n  *) echo testhost;;\nesac`;
@@ -1673,8 +1905,10 @@ for (const [step, tool, verb, suffix] of writeSteps) {
   }
 }
 
-// A signal while the copy runs leaves no half-written dyno.new behind either.
-for (const sig of ["INT", "TERM", "HUP"]) {
+// A signal while the copy runs leaves no half-written dyno.new behind either. The stub exits 0 after the signal, as
+// the curl stub of R7 does, so only the script's `trap 'exit 1'` stops the run before its next step, the chmod of the
+// new binary (watched by a stub that logs it).
+for (const sig of ["INT", "TERM", "HUP", "PIPE"]) {
   test(`R10 install.sh stopped by SIG${sig} while it copies the binary leaves no dyno.new and no temp directory`, async () => {
     const c = installCtx({ version: "v0.2.0-test" });
     seedInstall(c.root);
@@ -1682,11 +1916,15 @@ for (const sig of ["INT", "TERM", "HUP"]) {
     c.stub(
       "cp",
       `for a; do
-  case "$a" in *.new) printf partial > "$a"; kill -s ${sig} "$PPID"; exit 130;; esac
+  case "$a" in *.new) printf partial > "$a"; echo cp-signalled >> '@CALLS@'; kill -s ${sig} "$PPID"; exit 0;; esac
 done
 exec '${join(TOOLS, "cp")}' "$@"`,
     );
-    fails(await c.install());
+    c.stub("chmod", `echo "chmod $*" >> '@CALLS@'\nexec '${join(TOOLS, "chmod")}' "$@"`);
+    const r = await c.install();
+    expect(r.code).toBe(1); // the trap's exit, not the stub's
+    expect(c.calls()).toContain("cp-signalled"); // the copy of the new binary began, and the signal was sent
+    expect(c.calls().filter((l) => l.startsWith("chmod "))).toEqual([]); // and the run went no further
     expect(snapshot(c.root)).toEqual(before);
     expect(readdirSync(c.tmp)).toEqual([]);
   });
@@ -1743,7 +1981,7 @@ test("R12 install.sh links to the host DYNO_LISTEN names, on the first install a
     }
   }
   expect(got).toEqual(want);
-});
+}, MANY_RUNS_MS);
 
 test("R12 proxmox-lxc.sh links to the host DYNO_LISTEN names, else to the container's address", async () => {
   const got: [string, string | undefined][] = [];
@@ -1754,7 +1992,7 @@ test("R12 proxmox-lxc.sh links to the host DYNO_LISTEN names, else to the contai
     want.push([listen, linkFor(listen, ADDRESS, host)]);
   }
   expect(got).toEqual(want);
-});
+}, MANY_RUNS_MS);
 
 // R13: DYNO_LISTEN and DYNO_METRICS_LISTEN are for the first install. Once dyno.env exists, setting one on a re-run
 // changes nothing, so the installer says so instead of letting you think it worked. proxmox-lxc.sh passes both as empty
@@ -1829,6 +2067,7 @@ const TAILSCALE_KEY: Env = { DYNO_TAILSCALE: "1", TS_AUTHKEY: "tskey-auth-abc123
 // What fails, a glob over the arguments of the pct call that fails, and the environment of the run.
 const afterCreate: [name: string, glob: string, env: Env][] = [
   ["pct start", "start*", {}],
+  ["making the folder the files are pushed into", 'exec*"mkdir -p"*', {}],
   ["the push of the binary", "push*0755*", {}],
   ["the push of install.sh", "push*install.sh*", {}],
   ["the install inside the container", "exec*install.sh*", {}],
@@ -1859,39 +2098,43 @@ test("R15 a container that never gets an address is reported as left behind too"
   expect(lines[lines.length - 1]).toBe(LEFT("105"));
 });
 
-for (const sig of ["INT", "TERM", "HUP"]) {
+for (const sig of ["INT", "TERM", "HUP", "PIPE"]) {
   test(`R15 SIG${sig} while the new container's network is awaited ends by saying it is still there`, async () => {
     const c = pveCtx({ address: "" });
     c.stub("sleep", `kill -s ${sig} "$PPID"\nexit 130`); // the script is between two tries when the signal comes
     const r = await c.proxmox();
-    fails(r);
+    // The trap's exit. A script that ignored the signal would end on the stub's 130, through set -e.
+    expect(r.code).toBe(1);
     const lines = errLines(r);
     expect(lines[lines.length - 1]).toBe(LEFT("105"));
     expect(readdirSync(c.tmp)).toEqual([]);
   });
 }
 
-// Whether each of these runs says a container was left. Only the first has created one before it fails.
-const runs: [name: string, says: boolean, go: () => Promise<Result>][] = [
-  ["a failed pct start", true, async () => {
+// Whether each of these runs says a container was left, with the exit status the run has to end on and the message of
+// the failure that ends it on stderr (null: none, a success or a signal). Only the first has created a container before
+// it fails. A row that asserted only the absence of the still-there line would pass once its failure stopped happening.
+const runs: [name: string, says: boolean, code: number, message: string | null, go: () => Promise<Result>][] = [
+  ["a failed pct start", true, 3, "boom", async () => {
     const c = pveCtx();
     failPct(c, "start*", 3, "boom");
     return c.proxmox();
   }],
-  ["a success", false, () => pveCtx().proxmox()],
-  ["a failed pct create", false, async () => {
+  ["a success", false, 0, null, () => pveCtx().proxmox()],
+  ["a failed pct create", false, 3, "boom", async () => {
     const c = pveCtx();
     failPct(c, "create*", 3, "boom");
     return c.proxmox();
   }],
-  ["no Debian template", false, () => pveCtx({ templates: [] }).proxmox()],
-  ["a checksum mismatch", false, () => pveCtx({}, { badSum: ["install.sh"] }).proxmox()],
-  ["a signal during the download", false, async () => {
+  ["no Debian template", false, 1, "dyno: no Debian 12 or 13 template is available", () => pveCtx({ templates: [] }).proxmox()],
+  ["a checksum mismatch", false, 1, "dyno: checksum mismatch for install.sh; nothing was changed", () =>
+    pveCtx({}, { badSum: ["install.sh"] }).proxmox()],
+  ["a signal during the download", false, 1, null, async () => {
     const c = pveCtx();
     c.stub("curl", curlSignals("TERM"));
     return c.proxmox();
   }],
-  ["an install that fails on --upgrade", false, async () => {
+  ["an install that fails on --upgrade", false, 3, "boom", async () => {
     const c = pveCtx({ containers: { "106": "running" } });
     failPct(c, "exec*install.sh*", 3, "boom");
     return c.proxmox(["--upgrade"], { DYNO_CTID: "106" });
@@ -1899,8 +2142,10 @@ const runs: [name: string, says: boolean, go: () => Promise<Result>][] = [
 ];
 test("R15 only a failure after the create says a container was left; a success, an earlier failure and --upgrade don't", async () => {
   const wrong: string[] = [];
-  for (const [name, says, go] of runs) {
+  for (const [name, says, code, message, go] of runs) {
     const r = await go();
+    if (r.code !== code) wrong.push(`${name} exited ${r.code}, not ${code}`);
+    if (message !== null && !r.stderr.includes(message)) wrong.push(`${name} didn't say ${JSON.stringify(message)}`);
     if (r.out.includes("was created and is still there") !== says) wrong.push(`${name} ${says ? "didn't say it" : "said it"}`);
   }
   expect(wrong).toEqual([]);
@@ -1940,7 +2185,7 @@ test("R16 --upgrade goes ahead only for a container tagged exactly dyno, and ref
     }
   }
   expect(wrong).toEqual([]);
-});
+}, MANY_RUNS_MS);
 
 test("R16 a container the script created passes --upgrade, until its tag is taken off", async () => {
   const c = pveCtx();
@@ -1962,6 +2207,7 @@ test("R16 a container the script created passes --upgrade, until its tag is take
 // container as a file, tailscale up reads it from there, and the file is deleted whether or not tailscale up worked.
 const AUTH_KEY = "tskey-auth-k8s3Cr3t-abcdef";
 const KEY_FILE = "/root/ts-authkey";
+const isKeyRm = (l: string) => l.startsWith("pct exec 105 -- rm ") && l.endsWith(KEY_FILE);
 
 test("R17 TS_AUTHKEY reaches tailscale up through a file only root can read, and no pct argument holds the key", async () => {
   const c = pveCtx();
@@ -1982,6 +2228,7 @@ test("R17 TS_AUTHKEY reaches tailscale up through a file only root can read, and
   expect(push).toBeGreaterThanOrEqual(0);
   expect(up).toBeGreaterThan(push);
   expect(rm).toBeGreaterThan(up);
+  expect(calls.filter(isKeyRm)).toHaveLength(1); // once: the cleanup at exit (R20) doesn't delete it a second time
 });
 
 test("R17 the key file is deleted in the container even when tailscale up fails, and the run exits with its status", async () => {
@@ -1993,6 +2240,7 @@ test("R17 the key file is deleted in the container even when tailscale up fails,
   const up = calls.findIndex((l) => l.startsWith("pct exec 105 -- tailscale up "));
   expect(up).toBeGreaterThan(0);
   expect(calls.slice(up + 1).some((l) => l.startsWith("pct exec 105 -- rm ") && l.endsWith(KEY_FILE))).toBe(true);
+  expect(calls.filter(isKeyRm)).toHaveLength(1); // once: the cleanup at exit (R20) doesn't delete it a second time
   expect(calls.filter((l) => l.includes(AUTH_KEY))).toEqual([]);
 });
 
@@ -2036,7 +2284,7 @@ test("R18 the printed port follows dyno.env as systemd reads it, blanks around t
     if (r.code !== 0 || !link?.endsWith(`:${port}`)) wrong.push(`${name}: ${link}`);
   }
   expect(wrong).toEqual([]);
-});
+}, MANY_RUNS_MS);
 
 // R19: values made only of allowed characters that still aren't a port, or a host and a port, that dyno can bind. dyno
 // refuses them at startup, so the service would restart in a loop. A 20-digit port has to be refused too, and not crash
@@ -2055,6 +2303,240 @@ for (const name of ["DYNO_LISTEN", "DYNO_METRICS_LISTEN"]) {
   for (const script of ["install.sh", "proxmox-lxc.sh"] as const) {
     test(`R19 ${script} refuses a ${name} that is not a port or a host and port, and still accepts the real ones`, async () => {
       expect(await listenWrong(script, name, NOT_ADDRESSES, ADDRESSES)).toEqual([]);
-    });
+    }, MANY_RUNS_MS);
   }
 }
+
+// ---- regressions R20 and R21 (cases.md, "Added after black-box round 3"; round 4 widened R20, round 5 added PIPE to
+// R7 and R20). R20 is the signal case; R21 is about deletes that fail, whatever ended the run. ----
+
+const KEY_ENV: Env = { DYNO_TAILSCALE: "1", TS_AUTHKEY: AUTH_KEY };
+const UP = 'exec*"tailscale up"*'; // the glob of the pct call that runs tailscale up
+const DIR = "/root/dyno-install";
+
+// A pct call that signals the script (this stub's parent) and dies, as a Ctrl-C does to whatever runs when it comes.
+// It logs the signal too, so a pass can't mean the call never came.
+const signalBody = (sig: string) =>
+  `    echo "pct $*" >> '@CALLS@'\n    echo "signalled SIG${sig}" >> '@CALLS@'\n    kill -s ${sig} "$PPID"\n    exit 130`;
+
+// R20: tailscale up can wait on a bad or slow key, so a Ctrl-C, a kill or a dropped ssh session can come while the key
+// file is in the container. The key is the one secret a run leaves anywhere, so it goes however the run ends.
+for (const sig of ["INT", "TERM", "HUP", "PIPE"]) {
+  test(`R20 SIG${sig} during tailscale up still deletes the auth key in the container`, async () => {
+    const c = pveCtx();
+    wrapPct(c, [[UP, signalBody(sig)]]);
+    const r = await c.proxmox([], KEY_ENV);
+    expect(r.code).toBe(1);
+    const calls = c.calls();
+    expect(calls).toContain(`signalled SIG${sig}`); // tailscale up ran and the signal was sent
+    expect(c.pushes().some((x) => x.dst === KEY_FILE)).toBe(true);
+    const up = calls.findIndex((l) => l.startsWith("pct exec 105 -- tailscale up "));
+    expect(calls.slice(up + 1).filter(isKeyRm)).toHaveLength(1); // deleted at exit, once
+    const lines = errLines(r);
+    expect(lines[lines.length - 1]).toBe(LEFT("105")); // R15: the last thing said is that the container is there
+    expect(readdirSync(c.tmp)).toEqual([]);
+  });
+}
+
+// R20, widened by black-box round 4 (findings D5 and D3): two more ways to leave the key in the container, and the same
+// promise for each. A push can write the file and still fail, or a signal can come while it runs, so the script
+// remembers the key from just before the push. And a second signal, a double Ctrl-C, can come while the exit cleanup
+// runs: it must not cut the cleanup short, and at a terminal it would kill the delete as well.
+//
+// The usual pct stub only logs a delete, so that the files a run pushed can be read after it. These tests model the
+// container's rm instead: a delete of the key that works removes the file from the container's folder, and one that
+// fails leaves it there.
+const PUSH_KEY = "push*ts-authkey*"; // the glob of the pct call that pushes the key file
+const KEY_RM = `pct exec 105 -- rm -f ${KEY_FILE}`; // the call that deletes it at exit
+const RM_OK = `    rm -f '@CTR@${KEY_FILE}'\n    exit 0`; // the container's rm, working
+const RM_FAILS = `    echo "rm: the container is gone" >&2\n    exit 1`; // and failing: the file stays
+const keyIn = (c: Ctx) => c.p("ctr", "root", "ts-authkey");
+const keyPushes = (c: Ctx) => readText(c.p("pushes.tsv")).split("\n").filter((l) => l.split("\t")[2] === KEY_FILE).length;
+
+// A signal at a call as a terminal sends it, to the whole foreground group: the script gets it, and so does the call,
+// which dies of it before it does or says anything, unless the script has set that signal to be ignored for what it
+// starts.
+const groupSignal = (sig: string) =>
+  `    echo "signalled SIG${sig}" >> '@CALLS@'\n    kill -s ${sig} "$PPID"\n    kill -s ${sig} $$`;
+
+// The arm for the delete of the key file: it logs the call, takes the signal named (if any), then ends as `end` says.
+const keyRm = (end: string, hit?: string): [string, string] => [
+  `exec*"-- rm "*${KEY_FILE}`,
+  [`    echo "pct $*" >> '@CALLS@'`, hit ? groupSignal(hit) : "", end].filter(Boolean).join("\n"),
+];
+
+// The key push as a dropped link leaves it: the file lands in the container (the usual stub makes the push), then the
+// call reports a failure. For a signal the push finishes and exits 0, so that here only the signal, not a failed push,
+// ends the run.
+const pushLandsThenFails = `    '@REAL@' "$@"\n    echo "pct push: connection lost" >&2\n    exit 7`;
+const pushThenSignal = (sig: string) =>
+  `    '@REAL@' "$@"\n    echo "signalled SIG${sig}" >> '@CALLS@'\n    kill -s ${sig} "$PPID"\n    exit 0`;
+
+type KeyEnd = {
+  code: number; // the exit status
+  signals: string[]; // the signals the stubs sent, in order
+  up: boolean; // whether tailscale up was called
+  deletes?: number; // calls of the key's delete; once, at exit, unless said
+  stays?: boolean; // that delete fails: the key stays, and the run says so once
+  warns?: number | null; // warnings that the key couldn't be removed, if not as `stays` says; null: not checked
+};
+
+// What a run owes at its end, whatever ended it, when the key may have been in the container (R20): the key deleted
+// once, at exit, and gone from the container (when that delete fails, still there and said so once, right before the
+// still-there line), R15's still-there line last and once, the temp folder gone. It also checks that the run went as
+// the test meant: the key file pushed once, the signals sent, tailscale up called or not. Returns what is wrong, each
+// as what was wanted and what was seen, so a failing test lists all of it.
+function keyEnd(c: Ctx, r: Result, want: KeyEnd): string[] {
+  const calls = c.calls();
+  const lines = errLines(r);
+  const bad: string[] = [];
+  const check = (what: string, wanted: unknown, saw: unknown) => {
+    if (JSON.stringify(wanted) !== JSON.stringify(saw)) bad.push(`${what}: wanted ${JSON.stringify(wanted)}, saw ${JSON.stringify(saw)}`);
+  };
+  check("pushes of the key file", 1, keyPushes(c));
+  check("signals the stubs sent", want.signals.map((s) => `signalled SIG${s}`), calls.filter((l) => l.startsWith("signalled ")));
+  check("calls of tailscale up", want.up ? 1 : 0, calls.filter((l) => l.startsWith("pct exec 105 -- tailscale up ")).length);
+  check("exit status", want.code, r.code);
+  check(`calls of "${KEY_RM}"`, want.deletes ?? 1, times(calls, KEY_RM));
+  check("the key file in the container", want.stays ? "still there" : "gone", exists(keyIn(c)) ? "still there" : "gone");
+  if (want.warns !== null) {
+    check("warnings that the key couldn't be removed", want.warns ?? (want.stays ? 1 : 0), times(lines, CANT(KEY_FILE, "-f")));
+  }
+  check("stderr lines saying the container is still there", 1, times(lines, LEFT("105")));
+  check("the last stderr line", LEFT("105"), lines[lines.length - 1]);
+  if (want.stays) check("the last two stderr lines", [CANT(KEY_FILE, "-f"), LEFT("105")], lines.slice(-2));
+  check("what is left in the temp folder", [], readdirSync(c.tmp));
+  return bad;
+}
+
+test("R20 a key push that lands the file and then fails still deletes the key in the container", async () => {
+  const c = pveCtx();
+  wrapPct(c, [[PUSH_KEY, pushLandsThenFails], keyRm(RM_OK)]);
+  const r = await c.proxmox([], KEY_ENV);
+  expect(keyEnd(c, r, { code: 7, signals: [], up: false })).toEqual([]);
+});
+
+for (const sig of ["INT", "TERM", "HUP", "PIPE"]) {
+  test(`R20 SIG${sig} while the auth key is pushed still deletes it in the container`, async () => {
+    const c = pveCtx();
+    wrapPct(c, [[PUSH_KEY, pushThenSignal(sig)], keyRm(RM_OK)]);
+    const r = await c.proxmox([], KEY_ENV);
+    expect(keyEnd(c, r, { code: 1, signals: [sig], up: false })).toEqual([]);
+  });
+}
+
+// A signal ends the run during tailscale up, and a second one comes while the exit cleanup deletes the key. A double
+// Ctrl-C is INT and INT; the other pairs make each of the three signals the second one.
+const DOUBLE: [first: string, second: string][] = [["TERM", "HUP"], ["INT", "INT"], ["HUP", "TERM"], ["TERM", "PIPE"]];
+for (const [first, second] of DOUBLE) {
+  test(`R20 SIG${second} during the exit cleanup after SIG${first} doesn't stop the auth key being deleted`, async () => {
+    const c = pveCtx();
+    wrapPct(c, [[UP, signalBody(first)], keyRm(RM_OK, second)]);
+    const r = await c.proxmox([], KEY_ENV);
+    expect(keyEnd(c, r, { code: 1, signals: [first, second], up: true })).toEqual([]);
+  });
+
+  test(`R20 SIG${second} during the exit cleanup after SIG${first}, with the key delete failing, warns once before the still-there line`, async () => {
+    const c = pveCtx();
+    wrapPct(c, [[UP, signalBody(first)], keyRm(RM_FAILS, second)]);
+    const r = await c.proxmox([], KEY_ENV);
+    expect(keyEnd(c, r, { code: 1, signals: [first, second], up: true, stays: true })).toEqual([]);
+  });
+}
+
+// The one place the key is deleted twice, on purpose: a signal that lands while the normal path's own delete runs. The
+// script can't tell whether that delete finished (a Ctrl-C kills the call too), so the exit cleanup deletes again, and a
+// second rm -f does no harm. Here the first delete is killed before it removes anything: only the second one empties the
+// container. Whether the killed call's failure is warned about is not what this checks.
+test("R20 a signal landing while the key is deleted after tailscale up makes the exit cleanup delete it again", async () => {
+  const c = pveCtx();
+  const firstOneKilled = [
+    `    if [ ! -e '@CALLS@.seen' ]; then`,
+    `      : > '@CALLS@.seen'`,
+    groupSignal("INT"),
+    `      exit 130`,
+    `    fi`,
+    RM_OK,
+  ].join("\n");
+  wrapPct(c, [keyRm(firstOneKilled)]);
+  const r = await c.proxmox([], KEY_ENV);
+  expect(keyEnd(c, r, { code: 1, signals: ["INT"], up: true, deletes: 2, warns: null })).toEqual([]);
+});
+
+// R21: deleting what the run pushed is tidying. When it fails (the container stopped, pct exec refusing) the run says so
+// and goes on, so its exit status, the retry line (R5) and its last line (R15) are still those of the install, of
+// tailscale up or of the signal.
+const CANT = (path: string, flags: string, id = "105") =>
+  `dyno: couldn't remove ${path} in container ${id}; remove it with: pct exec ${id} -- rm ${flags} ${path}`;
+const RETRY = (id: string, status: number) =>
+  `dyno: the install inside container ${id} failed (exit ${status}); its message is above. Fix that, then run: DYNO_CTID=${id} sh proxmox-lxc.sh --upgrade`;
+const installFails: [string, string] = ["exec*install.sh*", failBody(3, "boom from the install")];
+const upFails: [string, string] = [UP, failBody(3, "tailscale up: invalid key")];
+// The delete of one path fails. The glob names the path, so the `rm` inside the Tailscale installer's sh -c isn't hit.
+const rmFails = (path: string): [string, string] => [`exec*"-- rm "*${path}`, failBody(1, "rm: the container is gone")];
+const times = (lines: string[], line: string) => lines.filter((l) => l === line).length;
+
+test("R21 an install that fails, with deleting its folder failing too, still exits with its status and prints the retry line", async () => {
+  const c = pveCtx();
+  wrapPct(c, [installFails, rmFails(DIR)]);
+  const r = await c.proxmox();
+  expect(r.code).toBe(3);
+  const lines = errLines(r);
+  expect(times(lines, CANT(DIR, "-rf"))).toBe(1);
+  expect(lines).toContain(RETRY("105", 3));
+  expect(lines[lines.length - 1]).toBe(LEFT("105"));
+});
+
+test("R21 the same with --upgrade ends on the retry line, and says nothing was created", async () => {
+  const c = pveCtx({ containers: { "106": "running" } });
+  wrapPct(c, [installFails, rmFails(DIR)]);
+  const r = await c.proxmox(["--upgrade"], { DYNO_CTID: "106" });
+  expect(r.code).toBe(3);
+  const lines = errLines(r);
+  expect(times(lines, CANT(DIR, "-rf", "106"))).toBe(1);
+  expect(lines[lines.length - 1]).toBe(RETRY("106", 3));
+  expect(r.out).not.toContain("was created and is still there");
+});
+
+test("R21 tailscale up that fails, with deleting the key file failing too, still exits with its status", async () => {
+  const c = pveCtx();
+  wrapPct(c, [upFails, rmFails(KEY_FILE)]);
+  const r = await c.proxmox([], KEY_ENV);
+  expect(r.code).toBe(3);
+  const lines = errLines(r);
+  expect(times(lines, CANT(KEY_FILE, "-f"))).toBe(1); // once: the cleanup at exit doesn't try and warn again
+  expect(c.calls().filter(isKeyRm)).toHaveLength(1);
+  expect(lines[lines.length - 1]).toBe(LEFT("105"));
+});
+
+test("R21 a signal during tailscale up, with deleting the key file at exit failing, still exits 1 and says it", async () => {
+  const c = pveCtx();
+  wrapPct(c, [[UP, signalBody("INT")], rmFails(KEY_FILE)]);
+  const r = await c.proxmox([], KEY_ENV);
+  expect(r.code).toBe(1);
+  const lines = errLines(r);
+  expect(times(lines, CANT(KEY_FILE, "-f"))).toBe(1); // a key left in the container is reported, not silent
+  expect(c.calls().filter(isKeyRm)).toHaveLength(1);
+  expect(lines[lines.length - 1]).toBe(LEFT("105"));
+});
+
+test("R21 an install that worked, with deleting its folder failing, warns and still ends well", async () => {
+  const c = pveCtx();
+  wrapPct(c, [rmFails(DIR)]);
+  const r = await c.proxmox();
+  succeeds(r);
+  expect(times(errLines(r), CANT(DIR, "-rf"))).toBe(1);
+  expect(r.stdout).toContain(`dyno: done. dyno is container 105; open http://${ADDRESS}:3966`);
+  expect(r.out).not.toContain("was created and is still there");
+});
+
+test("R21 tailscale up that worked, with deleting the folder and the key file failing, warns about each once", async () => {
+  const c = pveCtx();
+  wrapPct(c, [rmFails(DIR), rmFails(KEY_FILE)]);
+  const r = await c.proxmox([], KEY_ENV);
+  succeeds(r);
+  const lines = errLines(r);
+  expect(times(lines, CANT(DIR, "-rf"))).toBe(1);
+  expect(times(lines, CANT(KEY_FILE, "-f"))).toBe(1);
+  expect(c.calls().filter(isKeyRm)).toHaveLength(1);
+});
