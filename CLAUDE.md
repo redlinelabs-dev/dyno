@@ -60,7 +60,8 @@ ADR-0007.
 - **No Ookla code, CLI or servers.** Their EULA bans the multi-device and
   commercial use dyno exists for.
 - **Paid features stay separable.** Keep anything that could become paid in
-  its own module so the licence split (pending) costs no rewrite.
+  its own module so a commercial license or pro module (ADR-0021) costs no
+  rewrite.
 - **Brand.** Redline Labs palette and type (carbon #15171C, red #E3242B,
   deep red #8E141B, needle orange #FF5A1F, bone #F2EDE2, bezel #D8DBE0; Big
   Shoulders Display for numerals). Gauges have no numerals on the logo, but the

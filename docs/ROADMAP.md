@@ -171,11 +171,12 @@ its recovery arrive through ntfy, and the footprint soak still passes.
 ## M4. Public release
 
 Needs: M2.6. Licence and timing: ADR-0021 (AGPLv3 with a CLA, public once the
-installers work).
+installers work). `LICENSE` and `CONTRIBUTING.md` landed with ADR-0034, which
+took the repo public on 2026-11-15.
 
-- `LICENSE`, `CONTRIBUTING.md` and the CLA with its pull-request check, README for
-  r/selfhosted. The README says plainly what dyno does that the others don't,
-  from `competitor-features.md` §5: loaded latency and a bufferbloat grade, upload
+- The CLA with its pull-request check, and a README for r/selfhosted. The
+  README says plainly what dyno does that the others don't, from
+  `competitor-features.md` §5: loaded latency and a bufferbloat grade, upload
   counted on the server, no correction factor, no login required, nothing sent
   to a third party.
 - The name clearance check in ADR-0005.
