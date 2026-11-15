@@ -8,6 +8,10 @@ behind progressive disclosure. Private repo, solo developer.
 
 - `docs/brief.md`: the owner's request word for word, plus the acceptance
   checks. It outranks every other doc.
+- `docs/user-stories.md`: what users get, and each story's status. The owner
+  decides the UI and the stories, and sees UI questions as prototypes first.
+  Build sessions make the other calls themselves and record each in an ADR.
+  Keep the status column true.
 - `docs/decisions-pending.md`: open owner calls. Ask about them; leave them
   undecided in code.
 - `docs/adr/`: settled decisions, one file each. Write a new ADR whenever you

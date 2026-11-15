@@ -47,10 +47,12 @@ const (
 	RoutePlan
 	RouteResults
 	RouteUI
+	RouteSchedules
+	RouteSettings
 	numRoutes
 )
 
-var routeNames = [numRoutes]string{"other", "dl", "ul", "ping", "plan", "results", "ui"}
+var routeNames = [numRoutes]string{"other", "dl", "ul", "ping", "plan", "results", "ui", "schedules", "settings"}
 
 // RouteOf maps a ServeMux pattern (http.Request.Pattern) to its route label.
 func RouteOf(pattern string) Route {
@@ -63,8 +65,14 @@ func RouteOf(pattern string) Route {
 		return RoutePing
 	case "GET /api/v1/plan":
 		return RoutePlan
-	case "POST /api/v1/results", "GET /api/v1/results", "GET /api/v1/results/{id}":
+	case "POST /api/v1/results", "GET /api/v1/results", "GET /api/v1/results/{id}", "GET /api/v1/results.csv":
 		return RouteResults
+	case "GET /api/v1/schedules", "POST /api/v1/schedules", "POST /api/v1/schedules/check",
+		"GET /api/v1/schedules/{id}", "PATCH /api/v1/schedules/{id}", "DELETE /api/v1/schedules/{id}",
+		"POST /api/v1/schedules/{id}/run":
+		return RouteSchedules
+	case "GET /api/v1/settings", "PATCH /api/v1/settings":
+		return RouteSettings
 	case "GET /":
 		return RouteUI
 	}
@@ -99,12 +107,18 @@ type Metrics struct {
 	streams  [len(directionNames)]atomic.Int64
 	requests [numRoutes][maxCode - minCode + 1]atomic.Uint64
 
+	// lastClose is when a stream last closed, in Unix nanoseconds; 0 means
+	// none has. Serving reads it.
+	lastClose atomic.Int64
+
 	mu       sync.Mutex
 	byGrade  [len(grades)]uint64
 	download histogram
 	upload   histogram
 	idle     histogram
 	loaded   histogram
+
+	sched schedules // per-schedule series (schedules.go); its own lock
 }
 
 // New returns empty metrics for a server of the given version.
@@ -142,6 +156,9 @@ func (m *Metrics) StreamOpened(d Direction) {
 
 func (m *Metrics) StreamClosed(d Direction) {
 	if m != nil {
+		// Stamp before the decrement, so a reader that sees the gauge at
+		// zero also sees the stamp.
+		m.lastClose.Store(time.Now().UnixNano())
 		m.streams[d].Add(-1)
 	}
 }
@@ -216,6 +233,7 @@ func (m *Metrics) Append(b []byte) []byte {
 	b = m.idle.append(b, "dyno_result_idle_latency_seconds", "Idle latency of stored results.")
 	b = m.loaded.append(b, "dyno_result_loaded_latency_seconds", "Loaded latency of stored results, the worse of download and upload.")
 	m.mu.Unlock()
+	b = m.sched.append(b)
 
 	b = header(b, "dyno_bytes_sent_total", "counter", "Bytes written by /dl.")
 	b = sampleUint(b, "dyno_bytes_sent_total", m.sent.Load())

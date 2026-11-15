@@ -120,6 +120,12 @@ documented command to a passing test, and the docs match what was run.
 
 ## M3. Monitoring
 
+Needs: the owner's pick of the monitoring layout, from three prototypes
+(`prototypes/monitor-a.html`, `-b`, `-c`). The server side doesn't wait for it.
+How scheduled tests run: ADR-0028. Their API: ADR-0029. History by range, CSV
+export, retention and server settings: ADR-0030. Stories 17 to 33 in
+`docs/user-stories.md`.
+
 Scope: ADR-0019 (was #4). Testing an ISP needs a far end outside
 the house: a dyno on a VPS, or one on a Pi at someone else's house over the
 tailnet. The owner has one: `tailmeadow`, a tailnet node at a relative's house (about
@@ -179,6 +185,11 @@ installers work).
   counted on the server, no correction factor, no login required, nothing sent
   to a third party.
 - The name clearance check in ADR-0005.
+- A guard on the write endpoints before any dyno faces the internet, such as a
+  far end on a VPS (ADR-0029). With schedules, an open dyno can be made to
+  send about 300 GiB a day to any dyno, and its far-end check tells a caller
+  which addresses answer. Story 43 is the user-facing side. The guard's shape
+  is settled when M4 starts.
 - Fleet CI baseline (`JimmayVV/fleet-ci`), multi-arch images on GHCR with
   versioned tags (the image itself is built in M2.6).
 - A footprint report from a real Raspberry Pi.
@@ -188,7 +199,7 @@ installers work).
 
 ## M5. Stability and loss
 
-Needs: #5 (packet loss).
+Needs: nothing open. Packet loss: ADR-0025.
 
 - A stability mode behind the telemetry layer [~25]: continuous latency probes
   for a chosen time, with a live chart, min/avg/max, jitter and failed probes.
@@ -206,5 +217,7 @@ Needs: #5 (packet loss).
   cloudflare-speed-cli 1,082].
 - A light theme that follows the system [under 10]. Brand question first.
 - A multi-node fleet view, an iOS app (#10), white-label and SSO for pro (#6).
+  Before the iOS app: every API time printed with exactly three fraction
+  digits (ADR-0031), so Apple's date parsers read every field.
 - Not planned: InfluxDB and OpenTelemetry export. Prometheus covers the
   homelab case, and OTel's SDK costs more footprint than it returns here.

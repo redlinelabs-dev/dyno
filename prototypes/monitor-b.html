@@ -1,0 +1,1172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>dyno monitoring, variation B: a Monitor tab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Big+Shoulders+Display:wght@600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* ---------- prototype shell (same bar, blurb, phone-frame toggle and container-query stage as dyno-ui.html) ---------- */
+:root {
+  --sh-bg: #E7EAEE; --sh-fg: #15171C; --sh-mute: #5B636F; --sh-line: #C9CFD7; --sh-on: #15171C; --sh-onfg: #F2EDE2;
+  --carbon: #15171C; --black: #0B0D11; --bone: #F2EDE2; --bezel: #D8DBE0; --red: #E3242B; --deep: #8E141B; --orange: #FF5A1F;
+  --f-num: "Big Shoulders Display", "Barlow", sans-serif; --f-ui: "Barlow", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root { --sh-bg: #0B0D11; --sh-fg: #E6E8EB; --sh-mute: #8B929D; --sh-line: #272B32; --sh-on: #F2EDE2; --sh-onfg: #15171C; color-scheme: dark } }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--sh-bg); color: var(--sh-fg); font-family: var(--f-ui) }
+.shell { padding: 14px max(16px, env(safe-area-inset-right, 0px)) 32px max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 14px; max-width: 1240px; margin: 0 auto }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px }
+.bar .ttl { font-size: 15px; font-weight: 600; margin: 0 }
+.bar .ttl span { color: var(--sh-mute); font-weight: 400 }
+::placeholder { color: #8D929B; opacity: 1 }
+.bar .sp { flex: 1 }
+.bar .tag { font-size: 12px; color: var(--sh-mute) }
+.frame-t { font: inherit; font-size: 13px; color: var(--sh-fg); background: none; border: 1px solid var(--sh-line); border-radius: 999px; padding: 6px 12px; cursor: pointer }
+.frame-t[aria-pressed="true"] { background: var(--sh-on); color: var(--sh-onfg); border-color: var(--sh-on) }
+.blurb { margin: 0; font-size: 14.5px; color: var(--sh-mute); max-width: 74ch; line-height: 1.5 }
+@media (max-width: 520px) { #frame-t { display: none } .shell { padding: 10px 0 0; gap: 10px } .bar, .blurb { padding: 0 16px } }
+.stage { container: stage / inline-size; position: relative; overflow: hidden; border-radius: 18px; border: 1px solid var(--sh-line); height: max(700px, calc(100dvh - 200px)); background: #0F1115;
+  --mute: #8D929B; --line: #2A2E36; --face: #181A20; --s-panel: #15171C; --s-line: #2A2E36; --s-mute: #8D929B; --s-input: #0F1115; --c-down: var(--red); --c-up: var(--bezel); --c-lat: var(--orange); color-scheme: dark }
+.stage.phone { max-width: 390px; width: 100%; margin: 0 auto; border-radius: 36px; border: 10px solid var(--sh-on); height: max(820px, calc(100dvh - 200px)) }
+@media (max-width: 520px) { .stage { border-radius: 0; border-width: 1px 0 0; height: max(840px, calc(100dvh - 20px)) } }
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px }
+button { -webkit-tap-highlight-color: transparent; font-family: inherit }
+[hidden] { display: none !important }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
+
+/* ---------- the first screen: a static copy of the live app (web/src/style.css) ---------- */
+.v { height: 100%; color: var(--bone); font-family: var(--f-ui); display: grid; grid-template: auto minmax(0, 1fr) / minmax(0, 1fr); justify-items: center; gap: 12px; padding: 20px max(16px, 3cqi) 16px }
+.v-top { width: 100%; max-width: 1240px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; color: var(--mute) }
+.v-logo { display: flex; align-items: baseline; gap: 10px; margin: 0; font: inherit }
+.v-brand { font-family: var(--f-num); font-weight: 900; font-size: 24px; color: var(--bone); letter-spacing: .02em; font-style: italic; transform: skewX(-6deg) }
+.v-brand b { color: var(--red) }
+.v-by { font-size: 12px; color: var(--mute); letter-spacing: .02em }
+.v-host { min-width: 0; text-align: right; overflow-wrap: anywhere }
+.g-tick { stroke: var(--bone) } .g-tick.minor { stroke: var(--mute) }
+.g-lab { fill: var(--bone); font-family: var(--f-num); font-weight: 800; text-anchor: middle; dominant-baseline: middle }
+.g-red { fill: none; stroke: var(--red) } .g-ndl { fill: var(--orange) } .g-hub { fill: var(--black); stroke: var(--orange) }
+.g-needle, .g-ghost { transform-box: view-box; transition: transform .16s linear }
+.g-ghost line { stroke: var(--orange); opacity: .55 }
+.tele-link { font: inherit; font-size: max(13px, calc(14 * var(--p))); font-weight: 500; color: var(--mute); background: none; border: 0; padding: 8px 6px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px }
+.tele-link:hover { color: var(--bone) }
+.dot { display: inline-block; width: .55em; height: .55em; border-radius: 50%; background: var(--orange); margin-left: .45em; vertical-align: .05em; animation: blink 1s ease-in-out infinite }
+@keyframes blink { 50% { opacity: .25 } }
+.v-main { width: 100%; min-height: 0; display: grid; place-items: center }
+.fit { --p: 1px; width: calc(540 * var(--p)); display: grid; justify-items: center }
+.f-dial { position: relative; width: 100% }
+.f-dial svg { display: block; width: 100%; height: auto; overflow: visible }
+.f-track { fill: none; stroke: #20232A; stroke-width: 16; stroke-linecap: round }
+.f-fill { fill: none; stroke: var(--bone); stroke-width: 16; stroke-linecap: round }
+.f-over { fill: none; stroke: var(--red); stroke-width: 16 }
+.f-zone { fill: none; stroke: var(--red); stroke-width: 3 }
+.f-tip { fill: var(--orange); stroke: #0F1115; stroke-width: 5 }
+.f-lab { fill: var(--mute); font-family: var(--f-num); font-weight: 700; font-size: 17px; text-anchor: middle; dominant-baseline: middle }
+.f-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; padding-top: 6% }
+.f-phase { font-size: max(12px, calc(14 * var(--p))); color: var(--mute) }
+.f-val { font-family: var(--f-num); font-weight: 900; font-size: calc(168 * var(--p)); line-height: .88; font-variant-numeric: tabular-nums; letter-spacing: -.01em; --tn: .52em }
+.f-unit { font-family: var(--f-num); font-weight: 800; font-size: calc(34 * var(--p)); line-height: 1; letter-spacing: .02em; margin-top: calc(6 * var(--p)) }
+.tn { display: inline-block; width: var(--tn, .48em); text-align: center }
+.read { display: grid; grid-template-columns: max-content max-content; justify-content: center; column-gap: calc(56 * var(--p)); margin-top: calc(-4 * var(--p)) }
+.rg { --rule: var(--c-lat); font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: left; cursor: pointer; display: grid; grid-template-columns: max-content max-content; gap: 0 calc(36 * var(--p)); align-content: start }
+.rg.up { --rule: var(--c-up); grid-template-columns: max-content }
+.rg-h { grid-column: 1 / -1; font-size: max(14px, calc(16 * var(--p))); font-weight: 600; color: var(--bone); padding-bottom: .5em; margin-bottom: .62em; border-bottom: 2px solid var(--rule); transition: color .15s }
+.rg:hover .rg-h, .rg:focus-visible .rg-h { color: var(--rule) }
+.rv { display: grid; grid-template-columns: max-content max-content; align-items: baseline; column-gap: calc(5 * var(--p)); row-gap: 2px }
+.rl { grid-column: 1; text-align: right; font-size: max(12px, calc(14 * var(--p))); line-height: 1.4; min-height: 1.4em; color: var(--mute) }
+.rn { display: contents }
+.rn b { grid-row: 2; grid-column: 1; --tn: .52em; font-family: var(--f-num); font-weight: 900; font-size: calc(64 * var(--p)); line-height: .9; color: var(--bone); min-width: 1.6em; text-align: right }
+.rn b.wide { min-width: 2.38em }
+.rn small { grid-row: 2; grid-column: 2; font-size: max(12px, calc(15 * var(--p))); font-weight: 500; color: var(--mute) }
+.f-act { display: flex; gap: calc(14 * var(--p)); align-items: center; margin-top: calc(20 * var(--p)) }
+.go { font-size: max(14px, calc(15 * var(--p))); font-weight: 600; color: var(--carbon); background: var(--bone); border: 0; border-radius: 999px; padding: .73em 1.47em; cursor: pointer; min-width: 8.5em }
+.f-msg { margin: calc(12 * var(--p)) 0 0; max-width: 46ch; min-height: 2.9em; text-align: center; font-size: max(12.5px, calc(13.5 * var(--p))); line-height: 1.45; color: var(--mute) }
+
+/* ---------- the telemetry dialog (ADR-0013): a dialog from 700 px of stage width, a sheet below that ---------- */
+.sheet-wrap { position: absolute; inset: 0; z-index: 5; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); align-items: end }
+.sheet-back { position: absolute; inset: 0; background: rgb(5 6 8 / .62); border: 0; padding: 0; cursor: default }
+.sheet { position: relative; justify-self: center; width: min(100%, 880px); max-height: 100%; overflow: auto; overscroll-behavior: contain; background: var(--s-panel); color: var(--bone); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 20px 20px 0 0; padding: 10px max(18px, 3cqi) 30px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; font-family: var(--f-ui); animation: sheet-up .22s ease-out }
+@keyframes sheet-up { from { translate: 0 40px; opacity: 0 } }
+@keyframes modal-in { from { opacity: 0; scale: .98 } }
+.sheet-grab { width: 40px; height: 4px; border-radius: 2px; background: #3A3E47; justify-self: center }
+.sheet-head { position: sticky; top: -10px; z-index: 3; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: -6px calc(-1 * max(18px, 3cqi)) 0; padding: 14px max(18px, 3cqi) 8px; background: var(--s-panel) }
+.tabs-wrap { position: relative; min-width: 0 }
+.tabs { display: inline-flex; flex-wrap: wrap; gap: 4px }
+.tabs button { font-size: 14px; font-weight: 500; color: var(--mute); background: none; border: 1px solid transparent; border-radius: 999px; padding: 7px 13px; cursor: pointer; white-space: nowrap }
+.tabs button:hover { color: var(--bone) }
+.tabs button[aria-selected="true"] { color: var(--carbon); background: var(--bone) }
+.tabs .short { display: none }
+.tabs .dot { margin-left: .4em }
+.tabs button[aria-selected="true"] .dot { background: var(--deep) } /* orange on the bone pill is under 3:1 */
+.sheet-x { font-size: 14px; color: var(--bone); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; cursor: pointer; flex: none }
+@container stage (max-width: 699px) {
+  .sheet { height: calc(100% - 16px); max-height: none }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; padding: 4px 3px; margin: -4px -3px } /* room for the focus ring, which a scroll box would clip */
+  .tabs::-webkit-scrollbar { display: none }
+  /* The hint that the tabs scroll: the last tab is cut off, and an edge fades with an arrow on it while there is more that way. */
+  .tabs-wrap::before, .tabs-wrap::after { position: absolute; top: 0; bottom: 0; width: 38px; display: flex; align-items: center; pointer-events: none; color: var(--bone); font-size: 22px; line-height: 1; opacity: 0; transition: opacity .15s; z-index: 1 }
+  .tabs-wrap::before { content: "\2039"; left: -3px; width: 42px; justify-content: flex-start; padding-left: 9px; background: linear-gradient(270deg, transparent, var(--s-panel) 58%) }
+  .tabs-wrap::after { content: "\203A"; right: -3px; width: 42px; justify-content: flex-end; padding-right: 9px; background: linear-gradient(90deg, transparent, var(--s-panel) 58%) }
+  .tabs-wrap.more-l::before, .tabs-wrap.more-r::after { opacity: 1 }
+}
+@container stage (max-width: 480px) { .tabs button { padding: 7px 11px } .tabs .long { display: none } .tabs .short { display: inline } }
+@container stage (min-width: 700px) {
+  .sheet-wrap { align-items: center; padding: 24px }
+  .sheet-back { background: rgb(5 6 8 / .74) }
+  .sheet { width: min(100%, 920px); border-bottom: 1px solid var(--line); border-radius: 16px; padding: 22px 30px 30px; box-shadow: 0 30px 80px rgb(0 0 0 / .55); animation-name: modal-in; animation-duration: .16s }
+  .sheet-grab { display: none }
+  .sheet-head { top: -22px; margin: -22px -30px 0; padding: 22px 30px 10px }
+}
+
+/* ---------- form bits, as in the live Setup and History tabs, plus the few this prototype adds ---------- */
+.stage { --bad: #FF7B7F; --ok: #3DD6A4 }
+.pnlx { display: grid; gap: 16px; min-width: 0 }
+.note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--s-mute) }
+.setgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 22px }
+.field { display: grid; gap: 6px; align-content: start; border: 0; padding: 0; margin: 0; min-width: 0 }
+.field > label, .field > legend { font-size: 13px; color: var(--s-mute); padding: 0; margin-bottom: 6px }
+.field select, .field input:is([type="number"], [type="text"], [type="url"], [type="date"]) { font: inherit; font-size: 15px; background: var(--s-input); color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 8px 10px; min-width: 0; width: 100%; color-scheme: dark }
+.field input[aria-invalid="true"] { border-color: var(--bad) }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--s-line); border-radius: 6px; overflow: hidden; width: fit-content; max-width: 100% }
+.seg label { position: relative; cursor: pointer; font-size: 14px }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
+.seg span { display: block; padding: 7px 13px }
+.seg input:checked + span { background: var(--deep); color: var(--bone) }
+.seg input:focus-visible + span { outline: 2px solid var(--orange); outline-offset: -3px }
+.sbtn { font: inherit; font-size: 14px; background: none; color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 7px 12px; cursor: pointer }
+.sbtn:hover { border-color: #4A4F59 } .sbtn:disabled { opacity: .45; cursor: default }
+.pbtn { font: inherit; font-size: 14px; font-weight: 600; background: var(--bone); color: var(--carbon); border: 0; border-radius: 999px; padding: 8px 18px; cursor: pointer }
+.pbtn:disabled { opacity: .4; cursor: default }
+.dbtn { color: var(--bad); border-color: rgba(255, 123, 127, .45) }
+.exp { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 9px 18px; margin: 0; font-size: 14.5px }
+.kv dt { color: var(--s-mute) } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-family: var(--f-num); font-size: 17px; font-weight: 700 }
+.tw { overflow-x: auto }
+.hist { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; min-width: 520px }
+.hist th { text-align: left; font-weight: 500; color: var(--s-mute); font-size: 12.5px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--s-line) }
+.hist td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--s-line); white-space: nowrap; vertical-align: top }
+.hist td.n { font-family: var(--f-num); font-weight: 700; font-size: 16px }
+.hist td.from, .hist .dev { white-space: normal; overflow-wrap: anywhere; min-width: 10ch }
+.hist .dev { display: none }
+.hist td.why { white-space: normal; line-height: 1.45 }
+.hist tr.fail td { background: rgba(227, 36, 43, .07) }
+.hist tr.sub td { padding-top: 0; white-space: normal; font-size: 13px; color: var(--s-mute); line-height: 1.45 }
+.hist tr.has-sub td { border-bottom-color: transparent }
+.tag { display: inline-block; font-size: 12px; font-weight: 600; line-height: 1.5; padding: 0 8px; border-radius: 999px; border: 1px solid var(--s-line); color: var(--bone); white-space: nowrap }
+.tag.fail { color: var(--bad); border-color: rgba(255, 123, 127, .5) } .tag.path { border-style: dashed; border-color: var(--bone) } .tag.al { color: var(--orange); border-color: rgba(255, 90, 31, .55) } .tag.ok { color: var(--ok); border-color: rgba(61, 214, 164, .5) }
+@container stage (max-width: 480px) {
+  .hist { min-width: 0 } .hist .from { display: none } .hist td.when span { display: block } .hist td.when .dev { display: block; margin-top: 3px; font-size: 12.5px; color: var(--s-mute) }
+  .hist :is(th, td):last-of-type { padding-right: 0 }
+}
+.gradebox { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center }
+.grade { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 14px; background: var(--red); color: var(--bone); font-family: var(--f-num); font-weight: 900; font-size: 50px; line-height: 1 }
+.gradebox p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--s-mute) } .gradebox p b { color: var(--bone); font-weight: 600; display: block; margin-bottom: 2px }
+.latgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px 36px }
+@container stage (max-width: 640px) { .latgrid { grid-template-columns: 1fr } }
+.lg { display: grid; justify-items: center; gap: 2px; align-content: start }
+.lg svg { display: block; width: min(100%, 300px); height: auto; overflow: visible }
+.lg-read { font-family: var(--f-num); font-weight: 800; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; margin-top: 6px }
+.lg-read small { font-family: var(--f-ui); font-size: 13px; font-weight: 500; color: var(--s-mute); margin-left: 4px }
+.lg-busy { font-size: 13px; color: var(--orange) } .latside { display: grid; gap: 22px; align-content: start }
+
+/* ---------- History: range, series, three plots on one time axis, stats, events, results ---------- */
+.hs { container: hist / inline-size; display: grid; gap: 18px; min-width: 0 }
+.ctl { display: grid; gap: 12px }
+.ctl-row { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center }
+.dates { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end }
+.dates .field { width: 150px }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 0; margin: 0; padding: 0; min-width: 0 }
+.chips legend { float: left; margin-right: 10px; padding: 0; font-size: 13px; color: var(--s-mute) }
+.chip { --c: var(--bone); position: relative; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; padding: 6px 13px 6px 10px; border: 1px solid var(--s-line); border-radius: 999px; cursor: pointer; color: var(--s-mute) }
+.chip input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
+.chip i { width: 12px; height: 12px; border-radius: 3px; border: 2px solid var(--c); flex: none }
+.chip:has(input:checked) { color: var(--bone); border-color: #4A4F59; background: #1B1E25 }
+.chip:has(input:checked) i { background: var(--c) }
+.chip:has(input:focus-visible) { outline: 2px solid var(--orange); outline-offset: 2px }
+.sum { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--s-mute) } .sum b { color: var(--bone); font-weight: 600 }
+.charts { display: grid; gap: 4px; border-radius: 4px; outline-offset: 8px; scroll-margin-top: 76px }
+.hkey:focus-visible + .charts { outline: 2px solid var(--orange) }
+/* The alert marks above the first plot: each label ends in a pin over its moment, on its own row so two close moments never collide. */
+.trk { position: relative; height: 36px; margin-left: 42px; font-size: 12px; color: var(--bone) }
+.trk > span { position: absolute; top: 0; display: flex; align-items: center; gap: 5px; white-space: nowrap; line-height: 16px; transform: translateX(calc(-100% + 5px)) }
+.trk > span.rec { top: 18px }
+.trk > span.r { transform: translateX(-5px); flex-direction: row-reverse }
+.trk > span i { width: 0; height: 0; border: 5px solid transparent; border-top: 8px solid var(--bone); border-bottom: 0; flex: none }
+.hb { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px 26px; align-items: start }
+.hb-head { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; margin: 12px 0 8px }
+.hb-head h3 { margin: 0; font-size: 14px; font-weight: 600 } .hb-head span { font-size: 12.5px; color: var(--s-mute) }
+@container hist (min-width: 780px) { .hb { grid-template-columns: minmax(0, 1fr) 280px; row-gap: 0 } }
+.hp { position: relative; height: 150px; margin-left: 42px; touch-action: pan-y; cursor: crosshair }
+.hp svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible }
+.hg { stroke: #22252C; stroke-width: 1; vector-effect: non-scaling-stroke; shape-rendering: crispEdges } .hg.base { stroke: #3A3E47 }
+.hl { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke } .hl.dev { stroke-width: 1.25; opacity: .75 }
+.hd { fill: none; stroke-width: 6; stroke-linecap: round; vector-effect: non-scaling-stroke }
+.ha { stroke: none }
+.href { stroke: var(--red); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke } .href.al { stroke: var(--bone); opacity: .55; stroke-dasharray: 2 4 }
+.hga { stroke: var(--bone); opacity: .45; stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke }
+.hy { position: absolute; right: calc(100% + 8px); transform: translateY(50%); font-size: 11.5px; line-height: 1; color: var(--s-mute); font-variant-numeric: tabular-nums; white-space: nowrap }
+.hlab { position: absolute; margin: 0 0 4px 8px; font-size: 11.5px; color: var(--bone); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; text-shadow: 0 0 4px var(--s-panel), 0 0 2px var(--s-panel) }
+.hx { position: relative; height: 22px; margin-left: 42px; font-size: 11.5px; color: var(--s-mute); font-variant-numeric: tabular-nums }
+.hx span { position: absolute; top: 6px; transform: translateX(-50%); white-space: nowrap } .hx span.first { transform: none } .hx span.last { transform: translateX(-100%) }
+.mk { position: absolute; pointer-events: none }
+.mk.fail { top: 0; bottom: 0; transform: translateX(-50%); min-width: 7px; background: rgba(227, 36, 43, .22); border-left: 1px solid rgba(227, 36, 43, .7); border-right: 1px solid rgba(227, 36, 43, .7) }
+.mk.fail::after { content: "\00d7"; position: absolute; left: 50%; bottom: 3px; width: 15px; height: 15px; margin-left: -7.5px; border-radius: 50%; background: var(--red); color: #fff; font-size: 14px; font-weight: 700; line-height: 14px; text-align: center }
+.mk.path { width: 11px; height: 11px; margin: 0 0 -5.5px -5.5px; transform: rotate(45deg); border: 2px solid var(--bone); background: var(--s-panel) }
+.mk.al { top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(242, 237, 226, .55) }
+.hcross { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -.5px; background: var(--bone); opacity: .5; pointer-events: none }
+.hdot { position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; border-radius: 50%; border: 2px solid var(--bone); pointer-events: none }
+.tip { position: absolute; top: 8px; z-index: 2; margin-left: 12px; padding: 8px 11px; width: max-content; max-width: min(300px, 70cqi); background: #0F1115; border: 1px solid var(--s-line); border-radius: 6px; box-shadow: 0 8px 20px rgba(0, 0, 0, .45); font-size: 12.5px; line-height: 1.45; pointer-events: none }
+.tip.left { transform: translateX(calc(-100% - 24px)) }
+.tip p { margin: 0 0 5px; color: var(--s-mute) } .tip p b { color: var(--bone); font-weight: 600 } .tip p.bad strong { color: var(--bad) } .tip p.pc strong { color: var(--bone) }
+.tip ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; color: var(--s-mute) }
+.tip li b { font-family: var(--f-num); font-size: 17px; font-weight: 700; color: var(--bone); font-variant-numeric: tabular-nums }
+.sw { --c: var(--bone); display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 8px; vertical-align: middle; background: var(--c) }
+.st { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 2px }
+.st th, .st td { padding: 6px 0 6px 12px; text-align: right; border-bottom: 1px solid var(--s-line); font-weight: 500 }
+.st thead th { padding-top: 0; font-size: 12px; color: var(--s-mute) }
+.st tbody th { text-align: left; padding-left: 0; width: 100%; overflow-wrap: anywhere }
+.st td { font-family: var(--f-num); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums }
+.st td.none { color: #62666F }
+.evl { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px }
+.evb { font: inherit; font-size: 13.5px; line-height: 1.45; color: var(--bone); background: none; border: 1px solid var(--s-line); border-radius: 8px; padding: 8px 12px; cursor: pointer; text-align: left; width: 100%; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline }
+.evb:hover { border-color: #4A4F59 } .evb .when { color: var(--s-mute); font-variant-numeric: tabular-nums }
+.more { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center }
+#h-body { display: grid; gap: 22px; min-width: 0 }
+.h3 { margin: 0; font-size: 14px; font-weight: 600 }
+
+/* ---------- Monitor: scheduled tests, alerts, keep results ---------- */
+.mon { display: grid; gap: 26px; min-width: 0 }
+.jump { display: flex; flex-wrap: wrap; gap: 8px; align-items: center } .jump span { font-size: 13px; color: var(--s-mute) }
+.sec { display: grid; gap: 14px; padding-top: 24px; border-top: 1px solid var(--s-line); scroll-margin-top: 70px; min-width: 0 }
+.sec.first { padding-top: 0; border-top: 0 }
+.sec h2 { margin: 0; font-size: 17px; font-weight: 600 }
+.sec h3 { margin: 0; font-size: 14px; font-weight: 600 }
+.lead { margin: 0; font-size: 14px; line-height: 1.5; color: var(--s-mute); max-width: 70ch }
+.sched { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px }
+.sc { border: 1px solid var(--s-line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 12px; background: #181A20; min-width: 0 }
+.sc.running { border-color: var(--orange) } .sc.paused { opacity: .9 }
+.sc-top { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; align-items: flex-start }
+.sc-name { display: grid; gap: 2px; min-width: 0; flex: 1 1 220px } .sc-name b { font-size: 16px; font-weight: 600; overflow-wrap: anywhere } .sc-name span { font-size: 12.5px; line-height: 1.4; color: var(--s-mute) }
+.sc-act { display: flex; flex-wrap: wrap; gap: 8px }
+.sc-facts { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.5fr) minmax(0, .8fr); gap: 12px 20px; margin: 0 }
+.sc-facts dt { font-size: 12px; color: var(--s-mute); margin-bottom: 3px } .sc-facts dd { margin: 0; font-size: 14px; line-height: 1.45; min-width: 0 }
+.sc-facts dd b { font-family: var(--f-num); font-weight: 800; font-size: 17px; font-variant-numeric: tabular-nums }
+@container stage (max-width: 620px) { .sc-facts { grid-template-columns: 1fr 1fr } .sc-facts div:nth-child(2) { grid-column: 1 / -1; order: 3 } }
+.live-box { display: grid; gap: 10px; border-top: 1px solid var(--s-line); padding-top: 12px }
+.lv-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px }
+.lv-ph { font-size: 14px; font-weight: 600; display: flex; align-items: center; min-width: 14ch }
+.lv-n { font-family: var(--f-num); font-weight: 900; font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; min-width: 3.2ch; text-align: right }
+.lv-n small { font-family: var(--f-ui); font-size: 13px; font-weight: 500; color: var(--s-mute); margin-left: 5px }
+.lv-bar { height: 6px; border-radius: 3px; background: #2A2E36; overflow: hidden } .lv-bar i { display: block; height: 100%; width: 0; background: var(--orange) }
+.spark { width: 100%; max-width: 300px; height: 38px; display: block } .spark path { fill: none; stroke: var(--orange); stroke-width: 1.5; vector-effect: non-scaling-stroke }
+.frm { display: grid; gap: 14px; border: 1px solid var(--s-line); border-radius: 12px; padding: 16px; background: #181A20; min-width: 0 }
+.frm h3 { margin: 0; font-size: 15px }
+.frm-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px 20px }
+.frm-act { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center }
+.stat { margin: 0; min-height: 1.45em; font-size: 13.5px; line-height: 1.45 } .stat.ok { color: var(--ok) } .stat.bad { color: var(--bad) } .stat.wait { color: var(--s-mute) }
+.stat:empty { min-height: 0 }
+.field > .stat:empty, .chn .stat:empty { display: block; height: 0 }
+.opt { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; cursor: pointer; font-size: 14px }
+.opt input { margin: 3px 0 0; width: 18px; height: 18px; accent-color: var(--red) }
+.opt small { grid-column: 2; font-size: 12.5px; line-height: 1.4; color: var(--s-mute) }
+.plain { margin: 0; padding: 12px 14px; border-left: 3px solid var(--orange); background: #181A20; border-radius: 0 8px 8px 0; font-size: 14px; line-height: 1.55 } .plain b { font-weight: 600 }
+.chn { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px }
+.chn li { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; border: 1px solid var(--s-line); border-radius: 10px; padding: 10px 14px; background: #181A20 }
+.chn .kind { font-weight: 600; min-width: 5.5em } .chn .url { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 12.5px; color: var(--s-mute); overflow-wrap: anywhere; flex: 1 1 220px }
+.chn .stat { flex: 1 1 100% }
+.log { list-style: none; margin: 0; padding: 0 }
+.log li { display: grid; grid-template-columns: 6.5em 9.5em minmax(0, 1fr); gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--s-line); align-items: baseline; font-size: 14px; line-height: 1.45 }
+.log time { color: var(--s-mute); font-variant-numeric: tabular-nums; font-size: 13px }
+@container stage (max-width: 560px) { .log li { grid-template-columns: auto 1fr } .log li span:last-child { grid-column: 1 / -1 } }
+.health { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0; font-size: 14px; line-height: 1.5 }
+.keep-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 14px }
+.keep-row .opt { margin: 0 } .keep-row input[type="number"] { width: 100px }
+.sc-act .sbtn, .frm-act .sbtn, .frm-act .pbtn { min-height: 36px }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none } .sheet { animation: none } .g-needle, .g-ghost { transition: none } .tabs-wrap::before, .tabs-wrap::after { transition: none } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="bar">
+    <p class="ttl">dyno monitoring <span>variation B, a Monitor tab</span></p>
+    <span class="sp"></span>
+    <span class="tag">Simulated results, 30 days of example data. Times are UTC.</span>
+    <button class="frame-t" id="replay-t">Replay live test</button>
+    <button class="frame-t" id="frame-t" aria-pressed="false">Phone frame</button>
+  </div>
+  <p class="blurb" id="blurb">Variation B adds a fifth tab, Monitor, to the telemetry dialog. Scheduled tests, alerts and Keep results live there, and a test running now shows on its schedule's row; History gains the range picker, the three charts and the stats. Open Telemetry, then Monitor (the live test starts as it opens) and History. Try the phone frame: five tabs scroll sideways, with an arrow and a fading edge as the hint.</p>
+  <main class="stage" id="stage"><noscript>This prototype needs JavaScript.</noscript></main>
+</div>
+<script>
+"use strict";
+// ---- Shared simulated data for the monitoring prototypes. Pasted verbatim into each; don't edit. ----
+// A fixed seed and a fixed "now", so every prototype shows the same 30 days. Treat NOW as the
+// current time everywhere ("2 h ago", "next run in 47 min"); never use Date.now().
+const NOW = Date.parse("2026-11-13T18:00:00Z");
+const HOUR = 3600e3, DAY = 24 * HOUR;
+const PLAN_MBPS = 500; // the plan speed the owner entered in Setup; the dial's red zone starts here
+
+function mulberry32(a) {
+  return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const rnd = mulberry32(20261113);
+const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+const r1 = (v) => Math.round(v * 10) / 10;
+const grade = (added) => (added < 10 ? "A+" : added < 20 ? "A" : added < 50 ? "B" : added < 100 ? "C" : added < 500 ? "D" : "F");
+
+// One series per far end (scheduled tests) and one per device (tests run in a browser, ADR-0022).
+const SERIES = [
+  { id: "s-tailmeadow", kind: "schedule", name: "tailmeadow", where: "A dyno at a relative's house, over the internet" },
+  { id: "s-nas", kind: "schedule", name: "nas", where: "A dyno on the home LAN" },
+  { id: "d-edge", kind: "device", name: "Edge on Windows" },
+  { id: "d-iphone", kind: "device", name: "Safari on iPhone" },
+  { id: "d-ipad", kind: "device", name: "Kitchen iPad" },
+];
+
+function ok(series, at, down, up, idle, busyDown, busyUp, extra) {
+  const added = Math.max(busyDown, busyUp) - idle;
+  return { series, at, ok: true, download_mbps: r1(down), upload_mbps: r1(up), idle_ms: r1(idle), loaded_down_ms: r1(busyDown),
+    loaded_up_ms: r1(busyUp), jitter_ms: r1(0.2 + Math.abs(gauss()) * idle * 0.08), bufferbloat_ms: r1(added), grade: grade(added), ...extra };
+}
+const fail = (series, at, code, reason) => ({ series, at, ok: false, error_code: code, error: reason });
+
+const RESULTS = []; // oldest first
+// tailmeadow: a light test every 3 hours. Its line is capped by the far end's own upstream, so ~440 down.
+for (let t = Math.ceil((NOW - 30 * DAY) / (3 * HOUR)) * 3 * HOUR; t <= NOW - 2 * HOUR; t += 3 * HOUR) {
+  const ago = (NOW - t) / DAY, hour = new Date(t).getUTCHours();
+  const evening = hour >= 18 ? 0.92 : 1;
+  if (ago > 11.85 && ago < 12.2) { RESULTS.push(fail("s-tailmeadow", t, "unreachable", "Couldn't reach tailmeadow:3966: the connection timed out. Either end, or the internet between them, may have been down.")); continue; }
+  if (ago > 4.9 && ago < 5.05) { RESULTS.push(fail("s-tailmeadow", t, "stream_failed", "The download broke off after 2.1 s: tailmeadow closed the connection.")); continue; }
+  if (ago > 7.95 && ago < 8.1) { RESULTS.push(ok("s-tailmeadow", t, 310, 71, 86, 141, 152, { path_changed: true, note: "Latency was 86 ms against tailmeadow's usual 18 ms, so the test probably ran over a relay before a direct path formed. Not counted as slow." })); continue; }
+  if (ago > 2.45 && ago < 3.3) { RESULTS.push(ok("s-tailmeadow", t, 175 + gauss() * 12, 88 + gauss() * 3, 21 + Math.abs(gauss()), 96 + gauss() * 8, 64, { breach: true, retested: true })); continue; }
+  RESULTS.push(ok("s-tailmeadow", t, (440 + gauss() * 14) * evening, 92 + gauss() * 3, 18 + Math.abs(gauss()) * 1.5, 44 + gauss() * 4, 58 + gauss() * 5));
+}
+// nas: a full test every day at 03:00 UTC, on the LAN.
+for (let t = Math.ceil((NOW - 30 * DAY) / DAY) * DAY + 3 * HOUR; t <= NOW; t += DAY)
+  RESULTS.push(ok("s-nas", t, 941 + gauss() * 3, 937 + gauss() * 3, 0.4 + Math.abs(gauss()) * 0.1, 1.8 + Math.abs(gauss()) * 0.4, 2.1 + Math.abs(gauss()) * 0.4));
+// Browser tests at odd daytime moments.
+const DEVICES = [ // [series, tests per week, down, up, idle, busy]
+  ["d-edge", 3, [928, 8], [905, 10], [0.9, 0.2], [4, 1]],
+  ["d-iphone", 5, [420, 90], [380, 70], [4, 2], [25, 6]],
+  ["d-ipad", 2, [260, 50], [210, 40], [6, 2], [31, 7]],
+];
+for (const [series, perWeek, d, u, i, b] of DEVICES)
+  for (let k = 0; k < Math.round((perWeek * 30) / 7); k++) {
+    const day = Math.floor(rnd() * 30), at = NOW - day * DAY - (rnd() * 14 + 1) * HOUR;
+    const idle = Math.max(0.3, i[0] + gauss() * i[1]), busy = Math.max(idle + 1, b[0] + gauss() * b[1]);
+    RESULTS.push(ok(series, at, d[0] + gauss() * d[1], u[0] + gauss() * u[1], idle, busy, busy * 1.2));
+  }
+RESULTS.sort((a, b) => a.at - b.at);
+RESULTS.forEach((r, n) => (r.id = n + 1));
+
+const last = (s) => RESULTS.filter((r) => r.series === s).at(-1);
+const SCHEDULES = [
+  { id: "s-tailmeadow", far_end: "tailmeadow:3966", version: "v0.1.0", test: "light", every: "Every 3 hours", paused: false, last: last("s-tailmeadow"), next_at: last("s-tailmeadow").at + 3 * HOUR },
+  { id: "s-nas", far_end: "nas.lan:3966", version: "v0.1.0", test: "full", every: "Every day at 03:00", paused: false, last: last("s-nas"), next_at: last("s-nas").at + DAY },
+];
+// The one alert rule, and what it sent.
+const ALERT_RULE = { metric: "download", below: { percent_of_plan: 80 }, in_a_row: 3, retest: true, series: "s-tailmeadow" };
+const CHANNELS = [{ kind: "ntfy", url: "https://ntfy.sh/jimmy-dyno-7f3k" }];
+const SETTINGS = { plan_mbps: PLAN_MBPS, keep_days: null /* forever */, digest: "weekly", scheduler_stopped_alert: true };
+const breaches = RESULTS.filter((r) => r.breach);
+const ALERTS = [
+  { at: breaches[2].at, kind: "fired", text: `tailmeadow download below 80% of your 500 Mbit/s plan, 3 tests in a row (latest ${breaches[2].download_mbps} Mbit/s, retested)` },
+  { at: breaches.at(-1).at + 3 * HOUR, kind: "recovered", text: "tailmeadow download back above 400 Mbit/s" },
+  { at: NOW - 4 * DAY - 9 * HOUR, kind: "digest", text: "Weekly digest sent: 54 scheduled tests, 1 failed, download median 437 Mbit/s" },
+];
+
+// A scheduled test that starts while the page is open: one frame every 0.1 s.
+// phase: "warm" (pings so a tailnet path settles), "latency", "download", "upload", "done".
+const LIVE_RUN = [];
+for (let n = 0, t = 0; t <= 14.0001; n++, t = n / 10) {
+  const phase = t < 2 ? "warm" : t < 3 ? "latency" : t < 8 ? "download" : t < 13 ? "upload" : "done";
+  const ramp = (s) => Math.min(1, (t - s) / 1.2);
+  const mbps = phase === "download" ? r1(441 * ramp(3) + gauss() * 6) : phase === "upload" ? r1(92 * ramp(8) + gauss() * 2) : 0;
+  const ms = phase === "download" || phase === "upload" ? r1(45 + gauss() * 5) : r1(18 + Math.abs(gauss()));
+  LIVE_RUN.push({ t: r1(t), phase, mbps: Math.max(0, mbps), ms });
+}
+// ---- end of shared data ----
+// ================= helpers =================
+const stage = document.getElementById("stage");
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const pad2 = (n) => String(n).padStart(2, "0");
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const fDay = (t) => { const d = new Date(t); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; };
+const fTime = (t) => { const d = new Date(t); return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`; };
+const fWhen = (t) => `${fDay(t)}, ${fTime(t)}`;
+const dur = (ms) => { const m = Math.round(ms / 60e3); if (m < 60) return `${Math.max(1, m)} min`; const h = Math.round(ms / HOUR); return h < 48 ? `${h} h` : `${Math.round(ms / DAY)} d`; };
+const rel = (t) => (Math.abs(t - NOW) < 45e3 ? (t <= NOW ? "just now" : "now") : t < NOW ? `${dur(NOW - t)} ago` : `in ${dur(t - NOW)}`);
+const fmt = (v) => (v == null || Number.isNaN(v) ? "–" : v >= 100 ? Math.round(v).toLocaleString("en-US") : v >= 10 ? v.toFixed(0) : v.toFixed(1));
+const fms = (v) => (v == null || Number.isNaN(v) ? "–" : v < 10 ? v.toFixed(1) : String(Math.round(v)));
+const dig = (t) => `<span aria-hidden="true">${String(t).replace(/\d/g, '<span class="tn">$&</span>')}</span><span class="sr">${t}</span>`;
+const SBY = Object.fromEntries(SERIES.map((s) => [s.id, s]));
+const COL = { "s-tailmeadow": "#5AB4F0", "s-nas": "#3DD6A4", "d-edge": "#F2CF4A", "d-iphone": "#C792EA", "d-ipad": "#F2EDE2" }; // each 3:1 or better on the panel
+const seg = (name, opts, cur) => `<div class="seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}"${cur === v ? " checked" : ""}><span>${l}</span></label>`).join("")}</div>`;
+const options = (o, cur) => o.map(([v, l]) => `<option value="${v}"${String(cur) === String(v) ? " selected" : ""}>${l}</option>`).join("");
+const announce = (m) => { $("#live").textContent = m; };
+const HOOK = { hideTip: () => false, historyBuilt: false, plan: () => {} };
+const A = { sheet: null, tab: "latency", opener: null, plan: PLAN_MBPS };
+
+// ================= gauge geometry (web/src/gauge.ts) =================
+const P = (cx, cy, r, deg) => { const a = ((deg - 90) * Math.PI) / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
+const ARC = (cx, cy, r, a0, a1) => { const [x0, y0] = P(cx, cy, r, a0), [x1, y1] = P(cx, cy, r, a1); return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; };
+const logMap = (v) => Math.min(1, Math.max(0, Math.log10(Math.max(v || 0, 1)) / 4));
+const linMap = (max) => (v) => Math.min(1, Math.max(0, (v || 0) / max));
+const CL = { cx: 100, cy: 100, r: 88, map: linMap(150), red: 100 };
+function latencyGauge(idle, busy) {
+  const { cx, cy, r } = CL, tl = r * 0.17, ang = (v) => -120 + 240 * CL.map(v);
+  let s = `<circle cx="100" cy="100" r="${r * 1.065}" fill="var(--bezel)"/><circle cx="100" cy="100" r="${r * 1.025}" fill="var(--black)"/><circle cx="100" cy="100" r="${r}" fill="var(--face)"/>`;
+  s += `<path d="${ARC(cx, cy, r * 0.95, ang(CL.red), 120)}" class="g-red" stroke-width="${(r * 0.075).toFixed(1)}"/>`;
+  for (let v = 0; v <= 150; v += 10) {
+    const k = v % 50 === 0 ? "major" : "minor", len = k === "major" ? tl : tl * 0.4, a = ang(v);
+    const [x0, y0] = P(cx, cy, r * 0.9 - len, a), [x1, y1] = P(cx, cy, r * 0.9, a);
+    s += `<line class="g-tick ${k}" x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke-width="${(k === "major" ? r * 0.038 : r * 0.012).toFixed(2)}"/>`;
+    if (k === "major") { const [lx, ly] = P(cx, cy, r * 0.6, a); s += `<text class="g-lab" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="${(r * 0.16).toFixed(1)}">${v}</text>`; }
+  }
+  s += `<g class="g-ghost" style="transform-origin:100px 100px;transform:rotate(${ang(busy).toFixed(1)}deg)"><line x1="100" y1="${(cy - r * 0.97).toFixed(1)}" x2="100" y2="${(cy - r * 0.74).toFixed(1)}" stroke-width="${(r * 0.05).toFixed(1)}" stroke-linecap="round"/></g>`;
+  s += `<g class="g-needle" style="transform-origin:100px 100px;transform:rotate(${ang(idle).toFixed(1)}deg)"><path class="g-ndl" d="M${cx - r * 0.026} ${cy + r * 0.13} L${cx - r * 0.008} ${cy - r * 0.86} Q${cx} ${cy - r * 0.89} ${cx + r * 0.008} ${cy - r * 0.86} L${cx + r * 0.026} ${cy + r * 0.13}Z"/><circle class="g-hub" cx="100" cy="100" r="${(r * 0.085).toFixed(1)}" stroke-width="${(r * 0.02).toFixed(1)}"/></g>`;
+  return s;
+}
+
+// ================= the first screen: this device's last test, static =================
+const ME = RESULTS.filter((r) => r.series === "d-iphone" && r.idle_ms >= 2).at(-1); // this device's latest ordinary test
+const BUSY = Math.max(ME.loaded_down_ms, ME.loaded_up_ms);
+const FR = 170, FCX = 200, FCY = 200, fAng = (v) => -120 + 240 * logMap(v);
+const TRACK = ARC(FCX, FCY, FR, -120, 120);
+function dialHTML() {
+  const f = logMap(ME.download_mbps), fp = logMap(A.plan), [tx, ty] = P(FCX, FCY, FR, -120 + 240 * f);
+  const labs = [1, 10, 100, 1000, 10000].map((v, i) => { const [x, y] = P(FCX, FCY, FR - 34, fAng(v)); return `<text class="f-lab" x="${x.toFixed(1)}" y="${y.toFixed(1)}">${["1", "10", "100", "1G", "10G"][i]}</text>`; }).join("");
+  return `<path class="f-zone" d="${ARC(FCX, FCY, FR + 19, fAng(A.plan), 120)}"/><path class="f-track" d="${TRACK}"/>
+    <path class="f-fill" d="${TRACK}" pathLength="1" stroke-dasharray="${Math.min(f, fp).toFixed(4)} 1"/>
+    <path class="f-over" d="${TRACK}" pathLength="1" stroke-dasharray="${f > fp ? `0 ${fp.toFixed(4)} ${(f - fp).toFixed(4)} 1` : "0 1"}"/>${labs}<circle class="f-tip" r="10" cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}"/>`;
+}
+const TABS = [["latency", "Latency", "Latency"], ["speed", "Speed over time", "Speed"], ["setup", "Setup", "Setup"], ["history", "History", "History"], ["monitor", "Monitor", "Monitor"]];
+stage.innerHTML = `<div class="v" id="view">
+  <header class="v-top"><h1 class="v-logo"><span class="v-brand" aria-hidden="true">DYNO<b>/</b></span><span class="sr">dyno speed test</span><span class="v-by">by Redline Labs</span></h1><span class="v-host">This server (dyno.lan:3966)</span></header>
+  <div class="v-main"><div class="fit" id="fit">
+    <div class="f-dial"><svg viewBox="0 0 400 310" aria-hidden="true" id="dial">${dialHTML()}</svg>
+      <div class="f-center"><span class="f-phase">Download speed</span><span class="f-val">${dig(fmt(ME.download_mbps))}</span><span class="f-unit">Mbps</span></div></div>
+    <div class="read">
+      <button class="rg lat" data-open="latency" aria-haspopup="dialog"><span class="rg-h">Latency</span>
+        <span class="rv"><span class="rl">Idle</span><span class="rn"><b>${dig(fms(ME.idle_ms))}</b><small>ms</small></span></span>
+        <span class="rv"><span class="rl">Busy</span><span class="rn"><b>${dig(fms(BUSY))}</b><small>ms</small></span></span></button>
+      <button class="rg up" data-open="speed" aria-haspopup="dialog"><span class="rg-h">Upload</span>
+        <span class="rv"><span class="rl"></span><span class="rn"><b class="wide">${dig(fmt(ME.upload_mbps))}</b><small>Mbps</small></span></span></button></div>
+    <div class="f-act"><button class="go" id="f-go">Test again</button><button class="tele-link" id="tele" data-open="latency" aria-haspopup="dialog">Telemetry<span class="dot" id="tele-dot" aria-hidden="true" style="visibility:hidden"></span><span class="sr" id="tele-sr"></span></button></div>
+    <p class="f-msg" id="f-msg"></p></div></div></div>
+  <div class="sheet-wrap" id="sheet" hidden><button class="sheet-back" data-close tabindex="-1" aria-label="Close telemetry"></button>
+    <section class="sheet" id="dlg" role="dialog" aria-modal="true" aria-label="Telemetry"><div class="sheet-grab"></div>
+      <div class="sheet-head"><div class="tabs-wrap" id="tabs-wrap"><div class="tabs" id="tabs" role="tablist" aria-label="Telemetry" style="position:relative">${TABS.map(([k, l, s]) =>
+        `<button role="tab" id="tab-${k}" aria-controls="p-${k}" data-tab="${k}" aria-selected="false" tabindex="-1"><span class="long">${l}</span><span class="short">${s}</span><span class="dotslot"></span></button>`).join("")}</div></div>
+        <button class="sheet-x" data-close>Close</button></div>
+      ${TABS.map(([k]) => `<div role="tabpanel" id="p-${k}" aria-labelledby="tab-${k}" tabindex="0" hidden></div>`).join("")}</section></div>
+  <p class="sr" id="live" aria-live="polite"></p>`;
+$("#f-go").onclick = () => { $("#f-msg").textContent = "This prototype doesn't run speed tests. Open Telemetry to try monitoring."; };
+
+// Dial, readouts and actions scale as one composition (ADR-0016); --p is one design pixel.
+function fit() {
+  const main = $(".v-main"), el = $("#fit"), { width: W, height: H } = main.getBoundingClientRect();
+  const fits = (p) => { // small text has minimum sizes, so the real layout is measured, as web/src/main.ts does
+    el.style.setProperty("--p", `${p}px`);
+    return Math.max(...[el, ...el.children].map((e) => e.getBoundingClientRect().width)) <= W && el.getBoundingClientRect().height <= H;
+  };
+  let [lo, hi] = [0.2, Math.max(0.2, W / 540)];
+  for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2; if (fits(mid)) lo = mid; else hi = mid; }
+  el.style.setProperty("--p", `${lo}px`);
+}
+new ResizeObserver(fit).observe($(".v-main"));
+document.fonts?.ready.then(fit);
+fit();
+
+// ================= the dialog and its five tabs (WAI-ARIA tabs, automatic activation) =================
+const BUILD = {};
+const tabsEl = $("#tabs"), wrapEl = $("#tabs-wrap");
+function tabFade() {
+  wrapEl.classList.toggle("more-l", tabsEl.scrollLeft > 4);
+  wrapEl.classList.toggle("more-r", tabsEl.scrollLeft + tabsEl.clientWidth < tabsEl.scrollWidth - 4);
+}
+tabsEl.addEventListener("scroll", tabFade, { passive: true });
+const tabRO = new ResizeObserver(() => { const b = A.sheet && $(`#tab-${A.sheet}`); if (b) reveal(b); else tabFade(); }); // the strip, and each tab, which grows when its running dot appears
+tabRO.observe(tabsEl); $$("#tabs button").forEach((b) => tabRO.observe(b));
+function reveal(btn) {
+  const l = btn.offsetLeft, r = l + btn.offsetWidth;
+  if (l < tabsEl.scrollLeft + 40) tabsEl.scrollLeft = Math.max(0, l - 40);
+  else if (r > tabsEl.scrollLeft + tabsEl.clientWidth - 40) tabsEl.scrollLeft = r - tabsEl.clientWidth + 40;
+  tabFade();
+}
+function drawSheet() {
+  $("#sheet").hidden = !A.sheet;
+  $("#view").inert = !!A.sheet;
+  if (!A.sheet) return;
+  for (const [k] of TABS) {
+    const on = k === A.sheet;
+    const b = $(`#tab-${k}`), p = $(`#p-${k}`);
+    b.setAttribute("aria-selected", on); b.tabIndex = on ? 0 : -1; p.hidden = !on;
+    if (on && !BUILD[k]) { BUILD[k] = true; p.innerHTML = PANELS[k](); AFTER[k]?.(p); }
+  }
+  reveal($(`#tab-${A.sheet}`));
+  if (A.sheet === "monitor") HOOK.monitorOpened?.();
+}
+/** Scrolls the dialog, and only the dialog, so an element sits in its middle or just under the pinned tabs. */
+function scrollSheet(el, at) {
+  const dlg = $("#dlg"), r = el.getBoundingClientRect(), d = dlg.getBoundingClientRect();
+  const top = dlg.scrollTop + (at === "center" ? r.top + r.height / 2 - (d.top + d.height / 2) : r.top - d.top - 72);
+  dlg.scrollTo({ top, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+function openSheet(tab, opener) {
+  if (!A.sheet && opener) A.opener = opener;
+  A.sheet = tab; drawSheet();
+  $(`#tab-${tab}`).focus({ preventScroll: true });
+}
+function closeSheet() {
+  HOOK.hideTip();
+  A.sheet = null; drawSheet();
+  A.opener?.focus({ preventScroll: true }); A.opener = null;
+}
+stage.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-open],[data-close],[data-tab]");
+  if (!t) return;
+  if (t.dataset.open) openSheet(t.dataset.open, t);
+  else if (t.dataset.tab) openSheet(t.dataset.tab);
+  else closeSheet();
+});
+tabsEl.addEventListener("keydown", (e) => {
+  const keys = TABS.map(([k]) => k), i = keys.indexOf(A.sheet);
+  const n = e.key === "ArrowRight" ? (i + 1) % keys.length : e.key === "ArrowLeft" ? (i + keys.length - 1) % keys.length : e.key === "Home" ? 0 : e.key === "End" ? keys.length - 1 : -1;
+  if (n < 0) return;
+  e.preventDefault(); openSheet(keys[n]);
+});
+addEventListener("keydown", (e) => { if (e.key === "Escape" && A.sheet && !HOOK.hideTip()) closeSheet(); });
+
+// ================= the three tabs that don't change in this variation =================
+const GRADE_TEXT = { "A+": "No slowdown when the line is busy. Calls and games stay smooth during big downloads.", A: "Barely any slowdown when the line is busy. Calls and games stay smooth.", B: "Some slowdown when the line is busy. A video call may stutter while someone uploads a big file.", C: "Noticeable lag when the line is busy. Turning on smart queue management (SQM) in your router usually fixes this.", D: "Heavy lag when the line is busy. Turn on smart queue management (SQM) in your router.", F: "Severe lag when the line is busy. Calls and games will suffer. Turn on SQM in your router." };
+const PANELS = {
+  latency: () => `<div class="latgrid"><div class="lg"><svg viewBox="-6 -6 212 212" role="img" aria-label="Latency gauge. The needle is idle latency, ${fms(ME.idle_ms)} milliseconds; the orange marker is the highest latency while the line was busy, ${fms(BUSY)} milliseconds.">${latencyGauge(ME.idle_ms, BUSY)}</svg>
+      <span class="lg-read">${dig(fms(ME.idle_ms))}<small>ms</small></span><span class="lg-busy">${fms(BUSY)} ms when busy</span></div>
+    <div class="latside"><div class="gradebox"><span class="grade">${ME.grade}</span><p><b>Bufferbloat grade</b>${GRADE_TEXT[ME.grade]}</p></div>
+      <dl class="kv"><dt>Idle latency</dt><dd>${fms(ME.idle_ms)} ms</dd><dt>While downloading</dt><dd>${fms(ME.loaded_down_ms)} ms</dd><dt>While uploading</dt><dd>${fms(ME.loaded_up_ms)} ms</dd><dt>Jitter</dt><dd>${fms(ME.jitter_ms)} ms</dd><dt>Server</dt><dd>dyno.lan:3966</dd></dl></div></div>`,
+  speed: () => speedHTML(),
+  setup: () => `<div class="pnlx"><div class="setgrid">
+    <fieldset class="field"><legend>Test length</legend>${seg("set-prof", [["quick", "Quick"], ["standard", "Standard"], ["thorough", "Thorough"]], "standard")}<p class="note">Quick takes about 10 seconds, Standard about 20, Thorough about 30.</p></fieldset>
+    <div class="field"><label for="set-streams">Parallel connections</label><select id="set-streams">${options([["auto", "Auto (recommended)"], [1, 1], [2, 2], [4, 4], [5, 5]], "auto")}</select><p class="note">Auto uses what the server's plan asks for, 5 by default.</p></div>
+    <div class="field"><label for="set-plan">Your plan's download speed (Mbps)</label><input type="number" id="set-plan" min="1" value="${A.plan}"><p class="note">The dial's red zone starts here. Monitor's alerts and History's plan line use it too.</p></div>
+    <div class="field"><label for="set-name">This device's name</label><input type="text" id="set-name" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Safari on iPhone"><p class="note">History shows it beside this device's tests.</p></div>
+    <fieldset class="field"><legend>Units</legend>${seg("set-unit", [["Mbps", "Mbps"], ["MBps", "MB/s"]], "Mbps")}</fieldset></div>
+    <p class="note">Unchanged from the live app. In this prototype only the plan speed does anything.</p></div>`,
+  history: () => historyHTML(),
+  monitor: () => monitorHTML(),
+};
+const AFTER = { history: (p) => historyAfter(p), monitor: (p) => monitorAfter(p) };
+stage.addEventListener("change", (e) => {
+  if (e.target.id !== "set-plan") return;
+  A.plan = Math.max(1, Math.round(Number(e.target.value)) || PLAN_MBPS);
+  $("#dial").innerHTML = dialHTML();
+  HOOK.plan();
+});
+/** Speed over time: the last test from this device, drawn from LIVE_RUN's frames scaled to its result. Unchanged in spirit from the live tab. */
+function speedHTML() {
+  const T = 14, kd = ME.download_mbps / 441, ku = ME.upload_mbps / 92, X = (t) => (t / T) * 1000;
+  const ticks = { pos: [], labels: [] };
+  for (let t = 0; t <= T; t += 2) { ticks.pos.push((t / T) * 100); ticks.labels.push([(t / T) * 100, `${t} s`]); }
+  const [tt, ts] = nice(Math.max(ME.download_mbps, ME.upload_mbps) * 1.1), [lt, ls] = nice(Math.max(...LIVE_RUN.map((p) => p.ms)) * 1.1);
+  const line = (pts, top, col) => `<path class="hl" stroke="${col}" d="${curve(pts.map(([t, v]) => [X(t), 100 - (v / top) * 100]))}"/>`;
+  const dl = LIVE_RUN.filter((p) => p.phase === "download").map((p) => [p.t, p.mbps * kd]), ul = LIVE_RUN.filter((p) => p.phase === "upload").map((p) => [p.t, p.mbps * ku]);
+  const tp = plotFrame({ top: tt, step: ts, svg: line(dl, tt, "var(--c-down)") + line(ul, tt, "var(--c-up)"), ticks });
+  const lp = plotFrame({ top: lt, step: ls, svg: line(LIVE_RUN.map((p) => [p.t, p.ms]), lt, "var(--c-lat)"), ticks });
+  return `<div class="pnlx"><section><div class="hb-head"><h3>Throughput</h3><span>Mbps</span></div>${tp}
+    <p class="note" style="margin-top:6px"><i class="sw" style="--c:var(--c-down)"></i>Download ${fmt(ME.download_mbps)} <i class="sw" style="--c:var(--c-up);margin-left:14px"></i>Upload ${fmt(ME.upload_mbps)}</p></section>
+    <section><div class="hb-head"><h3>Latency</h3><span>ms</span></div>${lp}</section>
+    <p class="note">The last test from this device. Unchanged from the live app; scheduled tests and the other devices are in History and Monitor.</p></div>`;
+}
+// ================= History: one range, a series filter, three plots on one time axis =================
+const iso = (t) => new Date(t).toISOString().slice(0, 10);
+const H = { range: "30d", from: iso(NOW - 14 * DAY), to: iso(NOW), err: "", ok: [NOW - 14 * DAY, NOW], vis: { "s-tailmeadow": true, "s-nas": true, "d-edge": false, "d-iphone": false, "d-ipad": false }, rows: 25, only: false, hover: null, cur: null, w: 0 };
+const RANGES = { "24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY };
+const EVERY = { "s-tailmeadow": 3 * HOUR, "s-nas": DAY };
+const METRICS = [
+  { k: "down", key: "download_mbps", name: "Download", unit: "Mbit/s", f: fmt, say: "download", sayu: "megabits per second" },
+  { k: "up", key: "upload_mbps", name: "Upload", unit: "Mbit/s", f: fmt, say: "upload", sayu: "megabits per second" },
+  { k: "lat", key: "idle_ms", name: "Latency", unit: "ms, idle", f: fms, say: "idle latency", sayu: "milliseconds" },
+];
+function bounds() {
+  if (H.range !== "custom") return [NOW - RANGES[H.range], NOW];
+  const f = Date.parse(`${H.from}T00:00:00Z`), t = Date.parse(`${H.to}T23:59:59Z`);
+  if (!(f <= t)) { H.err = "The start date is after the end date. Pick a start on or before the end. The charts keep showing the last range that worked."; return H.ok; }
+  H.err = ""; H.ok = [Math.max(f, NOW - 30 * DAY), Math.min(t, NOW)];
+  return H.ok;
+}
+const pctl = (a, p) => { const i = (a.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i); return a[lo] + (a[hi] - a[lo]) * (i - lo); };
+function stats(rows, key) {
+  const v = rows.filter((r) => r.ok && !r.path_changed).map((r) => r[key]).sort((x, y) => x - y);
+  return v.length ? { min: v[0], max: v.at(-1), avg: v.reduce((a, b) => a + b, 0) / v.length, p10: pctl(v, 0.1) } : null;
+}
+/** An axis top and step: five-ish intervals of 1, 2, 2.5 or 5 times a power of ten (web/src/chart.ts). */
+function nice(max) {
+  if (!(max > 0)) return [1, 0.25];
+  const raw = max / 5, p = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 2.5, 5, 10].map((k) => k * p).find((s) => s >= raw);
+  return [Math.ceil(max / step - 1e-9) * step, step];
+}
+/** A monotone cubic through the points (Fritsch-Carlson): smooth, but never overshoots a sample (web/src/chart.ts). */
+function curve(pts) {
+  const n = pts.length;
+  if (n < 2) return "";
+  const m = [];
+  for (let i = 0; i < n - 1; i++) { const dx = pts[i + 1][0] - pts[i][0]; m.push(dx > 0 ? (pts[i + 1][1] - pts[i][1]) / dx : 0); }
+  const t = pts.map((_, i) => (i === 0 ? m[0] : i === n - 1 ? m[n - 2] : m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2));
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = t[i + 1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], s = a * a + b * b;
+    if (s > 9) { t[i] = ((3 / Math.sqrt(s)) * a) * m[i]; t[i + 1] = ((3 / Math.sqrt(s)) * b) * m[i]; }
+  }
+  let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(2)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], h = (x1 - x0) / 3;
+    d += `C${(x0 + h).toFixed(1)} ${(y0 + t[i] * h).toFixed(2)} ${(x1 - h).toFixed(1)} ${(y1 - t[i + 1] * h).toFixed(2)} ${x1.toFixed(1)} ${y1.toFixed(2)}`;
+  }
+  return d;
+}
+const XSTEPS = [1, 2, 3, 4, 6, 12].map((h) => h * HOUR).concat([1, 2, 3, 5, 7, 10, 14].map((d) => d * DAY));
+function timeTicks(t0, t1, n) {
+  const step = XSTEPS.find((s) => (t1 - t0) / s <= n) || XSTEPS.at(-1), pos = [], labels = [];
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) {
+    const p = ((t - t0) / (t1 - t0)) * 100, h = new Date(t).getUTCHours();
+    pos.push(p); labels.push([p, step < DAY && h !== 0 ? `${pad2(h)}:00` : fDay(t)]);
+  }
+  return { pos, labels };
+}
+/** One plot: an SVG stretched to its box, y labels and overlays in HTML over it (so text and marks never distort), and an x axis row. */
+function plotFrame({ top, step, svg, over = "", ticks, attrs = "", pre = "" }) {
+  let y = "", grid = "";
+  for (let v = 0; v <= top + 1e-9; v += step) {
+    const yy = (100 - (v / top) * 100).toFixed(2);
+    y += `<span class="hy" style="bottom:${((v / top) * 100).toFixed(2)}%">${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>`;
+    grid += `<line class="hg${v === 0 ? " base" : ""}" x1="0" x2="1000" y1="${yy}" y2="${yy}"/>`;
+  }
+  grid += ticks.pos.map((p) => `<line class="hg" x1="${(p * 10).toFixed(1)}" x2="${(p * 10).toFixed(1)}" y1="0" y2="100"/>`).join("");
+  const xl = ticks.labels.map(([p, l]) => `<span class="${p < 4 ? "first" : p > 96 ? "last" : ""}" style="left:${p.toFixed(2)}%">${l}</span>`).join("");
+  return `${pre}<div class="hp" aria-hidden="true" ${attrs}><svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">${grid}${svg}</svg>${y}${over}</div><div class="hx" aria-hidden="true">${xl}</div>`;
+}
+const HOVER_LAYER = `<i class="hcross" hidden></i><i class="hdot" hidden></i><div class="tip" hidden></div>`;
+
+function historyHTML() {
+  const chips = (kind, label) => `<fieldset class="chips"><legend>${label}</legend>${SERIES.filter((s) => s.kind === kind).map((s) =>
+    `<label class="chip" style="--c:${COL[s.id]}"><input type="checkbox" data-vis="${s.id}"${H.vis[s.id] ? " checked" : ""}><i></i>${esc(s.name)}</label>`).join("")}</fieldset>`;
+  return `<div class="hs" id="hs"><div class="ctl">
+    <div class="ctl-row"><fieldset class="field" style="margin:0"><legend class="sr">Time range</legend>${seg("h-range", [["24h", "24 h"], ["7d", "7 d"], ["30d", "30 d"], ["custom", "Custom"]], H.range)}</fieldset>
+      <div class="dates" id="h-dates"${H.range === "custom" ? "" : " hidden"}><div class="field"><label for="h-from">From</label><input type="date" id="h-from" value="${H.from}" min="${iso(NOW - 30 * DAY)}" max="${iso(NOW)}"></div><div class="field"><label for="h-to">To</label><input type="date" id="h-to" value="${H.to}" min="${iso(NOW - 30 * DAY)}" max="${iso(NOW)}"></div></div>
+      <span class="exp" style="margin-left:auto"><button class="sbtn" id="h-csv">Export CSV</button></span></div>
+    <p class="stat bad" id="h-err" role="alert" hidden></p>
+    <div class="ctl-row">${chips("schedule", "Far ends")}${chips("device", "Devices")}</div></div>
+    <div id="h-body"></div><p class="note" id="h-csvnote" aria-live="polite"></p></div>`;
+}
+
+function drawHistory() {
+  const body = $("#h-body"), [t0, t1] = bounds();
+  const err = $("#h-err"); err.hidden = !H.err; err.textContent = H.err;
+  $("#h-from").setAttribute("aria-invalid", !!H.err); $("#h-to").setAttribute("aria-invalid", !!H.err);
+  const rows = RESULTS.filter((r) => H.vis[r.series] && r.at >= t0 && r.at <= t1);
+  const vis = SERIES.filter((s) => H.vis[s.id]);
+  const c = (H.cur = { t0, t1, rows, tops: {}, root: body });
+  H.hover = null;
+  $("#h-csv").textContent = `Export CSV (${rows.length} rows)`;
+  if (!vis.length || !rows.length) {
+    body.innerHTML = `<p class="note">${vis.length ? "None of the series you picked ran a test in this range. Pick a longer range, or another series." : "Pick at least one far end or device above to see its results."}</p>`;
+    return;
+  }
+  H.w = $("#hs").clientWidth;
+  const plotW = H.w >= 780 ? H.w - 306 - 42 : H.w - 42;
+  const ticks = timeTicks(t0, t1, Math.max(3, Math.floor(plotW / 78)));
+  const pc = (t) => ((t - t0) / (t1 - t0)) * 100, X = (t) => pc(t) * 10;
+  const alerts = ALERTS.filter((a) => a.kind !== "digest" && a.at >= t0 && a.at <= t1);
+  const trk = alerts.length ? `<div class="trk" aria-hidden="true">${alerts.map((a) => `<span class="${a.kind === "fired" ? "fired" : "rec"}${pc(a.at) < 25 ? " r" : ""}" style="left:${pc(a.at).toFixed(2)}%">${a.kind === "fired" ? "Alert fired" : "Alert recovered"}<i></i></span>`).join("")}</div>` : "";
+  const rule = ruleLevel();
+  const blocks = METRICS.map((m, idx) => {
+    const [top, step] = nice(Math.max(1, ...rows.filter((r) => r.ok).map((r) => r[m.key]), m.k === "down" ? A.plan : 0) * 1.06);
+    c.tops[m.k] = top;
+    const Y = (v) => 100 - (v / top) * 100, uid = `g${m.k}`;
+    let svg = `<defs>${vis.filter((s) => s.kind === "schedule").map((s) => `<linearGradient id="${uid}-${s.id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="100"><stop offset="0" stop-color="${COL[s.id]}" stop-opacity=".24"/><stop offset="1" stop-color="${COL[s.id]}" stop-opacity="0"/></linearGradient>`).join("")}</defs>`;
+    svg += alerts.map((a) => `<line class="hga" x1="${X(a.at).toFixed(1)}" x2="${X(a.at).toFixed(1)}" y1="0" y2="100"/>`).join("");
+    let over = "";
+    if (m.k === "down") {
+      svg += `<line class="href" x1="0" x2="1000" y1="${Y(A.plan).toFixed(2)}" y2="${Y(A.plan).toFixed(2)}"/>`;
+      over += `<span class="hlab" style="left:0;bottom:${((A.plan / top) * 100).toFixed(2)}%">Plan speed ${A.plan} Mbit/s</span>`;
+      if (rule && (RULE.series === "all" ? vis.some((s) => s.kind === "schedule") : H.vis[RULE.series])) {
+        svg += `<line class="href al" x1="0" x2="1000" y1="${Y(rule).toFixed(2)}" y2="${Y(rule).toFixed(2)}"/>`;
+        over += `<span class="hlab" style="left:0;top:${(100 - (rule / top) * 100).toFixed(2)}%;margin:3px 0 0 8px">Alert level ${Math.round(rule)} Mbit/s</span>`; // under its line, so it doesn't sit on the plan label
+      }
+    }
+    for (const s of vis) {
+      const segs = []; let cur = [];
+      for (const r of rows) {
+        if (r.series !== s.id) continue;
+        if (!r.ok) { if (cur.length) segs.push(cur); cur = []; } else if (!r.path_changed) cur.push([X(r.at), Y(r[m.key])]);
+      }
+      if (cur.length) segs.push(cur);
+      const dev = s.kind === "device", pt = ([x, y]) => `${x.toFixed(1)} ${y.toFixed(2)}`;
+      // A far end tests on a clock, so its line is smooth. A device tests whenever someone does, days apart: straight segments and a dot on every real test, so nothing is implied in between.
+      svg += segs.map((sg) => dev
+        ? (sg.length > 1 ? `<path class="hl dev" stroke="${COL[s.id]}" d="${sg.map((p, i) => `${i ? "L" : "M"}${pt(p)}`).join("")}"/>` : "") + `<path class="hd" stroke="${COL[s.id]}" d="${sg.map((p) => `M${pt(p)}h.01`).join("")}"/>`
+        : sg.length === 1 ? `<path class="hd" stroke="${COL[s.id]}" d="M${pt(sg[0])}h.01"/>`
+          : `<path class="ha" fill="url(#${uid}-${s.id})" d="${curve(sg)}L${sg.at(-1)[0].toFixed(1)} 100L${sg[0][0].toFixed(1)} 100Z"/><path class="hl" stroke="${COL[s.id]}" d="${curve(sg)}"/>`).join("");
+    }
+    for (const r of rows) {
+      if (!r.ok) over += `<i class="mk fail" style="left:${pc(r.at).toFixed(2)}%;width:${(Math.min(6 * HOUR, EVERY[r.series] || 3 * HOUR) / (t1 - t0) * 100).toFixed(2)}%"></i>`;
+      else if (r.path_changed) over += `<i class="mk path" style="left:${pc(r.at).toFixed(2)}%;bottom:${((r[m.key] / top) * 100).toFixed(2)}%"></i>`;
+    }
+    const st = vis.map((s) => {
+      const q = stats(rows.filter((r) => r.series === s.id), m.key), td = (k) => (q ? `<td>${m.f(q[k])}</td>` : `<td class="none">–</td>`);
+      return `<tr><th scope="row"><i class="sw" style="--c:${COL[s.id]}"></i>${esc(s.name)}</th>${td("min")}${td("avg")}${td("p10")}${td("max")}</tr>`;
+    }).join("");
+    return `<section class="hb" aria-labelledby="hb-${m.k}"><div class="hb-head"><h3 id="hb-${m.k}">${m.name}</h3><span>${m.unit}</span></div>
+      <div>${plotFrame({ top, step, svg, over: over + HOVER_LAYER, ticks, attrs: `data-k="${m.k}"`, pre: idx === 0 ? trk : "" })}</div>
+      <div><table class="st"><caption class="sr">${m.name} over the range, ${m.unit}</caption><thead><tr><th scope="col"><span class="sr">Series</span></th><th scope="col">Min</th><th scope="col">Avg</th><th scope="col">p10</th><th scope="col">Max</th></tr></thead><tbody>${st}</tbody></table></div></section>`;
+  });
+  const failed = rows.filter((r) => !r.ok).length, paths = rows.filter((r) => r.path_changed).length;
+  body.innerHTML = `<p class="sum"><b>${rows.length}</b> results in range: <b>${failed}</b> failed, <b>${paths}</b> path change${paths === 1 ? "" : "s"}.</p>
+    <div class="hkey sr" id="h-key" role="slider" tabindex="0" aria-label="Results over time. Use the arrow keys to step through them one at a time, and Page Up and Page Down to jump ten." aria-valuemin="0" aria-valuemax="${rows.length - 1}" aria-valuenow="0" aria-valuetext="No result chosen"></div>
+    <div class="charts" id="h-charts">${blocks.join("")}</div>
+    <p class="note">How to read this: on Download, the dashed red line is your plan speed and the dotted line is the level that fires the alert. A red column marked × is a failed run, and the line breaks there. A hollow diamond is a path change, kept out of the lines and the numbers because it says the route changed, not that the line got slow. Min, Avg, p10 and Max cover finished tests only. p10 is the value 9 in 10 tests beat; for latency it's the low end.</p>
+    <div class="pnlx"><h3 class="h3">Failed runs, path changes and alerts</h3><ul class="evl" id="h-events"></ul></div>
+    <div class="pnlx" id="h-table"></div>`;
+  drawEvents(); drawTable();
+}
+/** The download level that fires the alert, if the rule is about download below something. */
+function ruleLevel() {
+  const r = RULE;
+  return r.metric === "download" && r.dir === "below" ? (r.unit === "percent" ? (r.value / 100) * A.plan : r.unit === "mbps" ? r.value : null) : null;
+}
+function nearest(t) {
+  const a = H.cur.rows; let lo = 0, hi = a.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (a[mid].at < t) lo = mid + 1; else hi = mid; }
+  return lo > 0 && Math.abs(a[lo - 1].at - t) <= Math.abs(a[lo].at - t) ? lo - 1 : lo;
+}
+function tipHTML(r) {
+  let h = `<p><i class="sw" style="--c:${COL[r.series]}"></i><b>${esc(SBY[r.series].name)}</b>, ${fWhen(r.at)} UTC</p>`;
+  if (!r.ok) return h + `<p class="bad"><strong>Failed.</strong> ${esc(r.error)}</p>`;
+  h += `<ul><li><b>${fmt(r.download_mbps)}</b> Mbit/s down</li><li><b>${fmt(r.upload_mbps)}</b> Mbit/s up</li><li><b>${fms(r.idle_ms)}</b> ms idle latency</li></ul>`;
+  if (r.path_changed) h += `<p class="pc"><strong>Path changed.</strong> ${esc(r.note)}</p>`;
+  else if (r.breach) h += `<p>Below the alert level${r.retested ? ", and retested" : ""}.</p>`;
+  return h;
+}
+function describe(r) {
+  const who = `${fWhen(r.at)} UTC, ${SBY[r.series].name}`;
+  if (!r.ok) return `${who}. Failed. ${r.error}`;
+  return `${who}. Download ${fmt(r.download_mbps)}, upload ${fmt(r.upload_mbps)} megabits per second, idle latency ${fms(r.idle_ms)} milliseconds.${r.path_changed ? " Path changed. " + r.note : r.breach ? " Below the alert level." : ""}`;
+}
+function showHover() {
+  const c = H.cur, h = H.hover; if (!c || !$("#h-charts")) return;
+  const span = c.t1 - c.t0;
+  $$(".hp", c.root).forEach((el) => {
+    const cross = $(".hcross", el), dot = $(".hdot", el), tip = $(".tip", el);
+    if (!h) { cross.hidden = dot.hidden = tip.hidden = true; return; }
+    const r = c.rows[h.i], x = ((r.at - c.t0) / span) * 100, m = METRICS.find((q) => q.k === el.dataset.k);
+    cross.hidden = false; cross.style.left = `${x}%`;
+    dot.hidden = !(r.ok && !r.path_changed);
+    if (!dot.hidden) { dot.style.left = `${x}%`; dot.style.top = `${100 - (r[m.key] / c.tops[m.k]) * 100}%`; dot.style.background = COL[r.series]; }
+    tip.hidden = h.plot !== el.dataset.k;
+    if (!tip.hidden) {
+      tip.innerHTML = tipHTML(r); tip.classList.toggle("left", x > 55); tip.style.left = `${x}%`; tip.style.translate = "";
+      const box = $("#hs").getBoundingClientRect(), tr = tip.getBoundingClientRect(); // keep it inside the dialog's content on a narrow screen
+      if (tr.left < box.left) tip.style.translate = `${box.left - tr.left}px 0`; else if (tr.right > box.right) tip.style.translate = `${box.right - tr.right}px 0`;
+    }
+  });
+  const key = $("#h-key");
+  key.setAttribute("aria-valuenow", h ? h.i : 0);
+  key.setAttribute("aria-valuetext", h ? describe(c.rows[h.i]) : "No result chosen");
+}
+HOOK.hideTip = () => { if (!H.hover) return false; H.hover = null; showHover(); return true; };
+HOOK.plan = () => { if (BUILD.history) drawHistory(); if (BUILD.monitor) drawRule(); };
+function drawEvents() {
+  const c = H.cur, ev = [], lastOk = {};
+  let g = null;
+  for (const r of c.rows) {
+    if (r.ok) { lastOk[r.series] = r.at; if (r.path_changed) ev.push({ k: "path", at: r.at, r }); continue; }
+    if (g && g.series === r.series && !(lastOk[r.series] > g.end)) { g.end = r.at; g.n++; }
+    else { g = { k: "fail", series: r.series, at: r.at, end: r.at, n: 1, r }; ev.push(g); }
+  }
+  for (const a of ALERTS) if (a.kind !== "digest" && a.at >= c.t0 && a.at <= c.t1) ev.push({ k: a.kind, at: a.at, a });
+  ev.sort((x, y) => y.at - x.at);
+  $("#h-events").innerHTML = ev.map((e) => {
+    let tag, txt, when = `${fWhen(e.at)} UTC`;
+    if (e.k === "fail") { tag = `<span class="tag fail">${e.n > 1 ? `${e.n} failed in a row` : "Failed"}</span>`; if (e.n > 1) when = `${fWhen(e.at)} to ${fTime(e.end)} UTC`; txt = `${esc(SBY[e.series].name)}: ${esc(e.r.error)}`; }
+    else if (e.k === "path") { tag = `<span class="tag path">Path changed</span>`; txt = `${esc(SBY[e.r.series].name)}: ${esc(e.r.note)}`; }
+    else { tag = `<span class="tag ${e.k === "fired" ? "al" : "ok"}">${e.k === "fired" ? "Alert fired" : "Alert recovered"}</span>`; txt = esc(e.a.text); }
+    return `<li><button class="evb" data-jump="${e.at}">${tag}<span class="when">${when}</span><span>${txt}</span></button></li>`;
+  }).join("") || `<li class="note">Nothing failed and no alert fired in this range.</li>`;
+}
+function drawTable(focus) {
+  const c = H.cur, odd = (r) => !r.ok || r.path_changed;
+  let list = c.rows.slice().reverse();
+  const nOdd = list.filter(odd).length;
+  if (H.only) list = list.filter(odd);
+  const shown = list.slice(0, H.rows), who = (r) => `<bdi>${esc(SBY[r.series].name)}</bdi>`, when = (r) => `<span>${fDay(r.at)},</span> <span>${fTime(r.at)}</span>`;
+  const body = shown.map((r) => {
+    const head = `<td class="when">${when(r)}<span class="dev">${who(r)}</span></td><td class="from">${who(r)}</td>`;
+    if (!r.ok) return `<tr class="fail">${head}<td class="why" colspan="4"><span class="tag fail">Failed</span> ${esc(r.error)}</td></tr>`;
+    const pc = r.path_changed;
+    return `<tr${pc ? ' class="has-sub"' : ""}>${head}<td class="n">${fmt(r.download_mbps)}</td><td class="n">${fmt(r.upload_mbps)}</td><td class="n">${fms(r.idle_ms)} ms</td><td>${pc ? '<span class="tag path">Path changed</span>' : esc(r.grade)}</td></tr>` +
+      (pc ? `<tr class="sub"><td class="when"></td><td class="from"></td><td colspan="4">${esc(r.note)}</td></tr>` : "");
+  }).join("");
+  $("#h-table").innerHTML = `<h3 class="h3">Results</h3><label class="opt"><input type="checkbox" id="h-only"${H.only ? " checked" : ""}>Only failed runs and path changes (${nOdd})</label>
+    <div class="tw" role="region" aria-label="Results in range" tabindex="0"><table class="hist"><thead><tr><th>When (UTC)</th><th class="from">From</th><th>Down</th><th>Up</th><th>Latency</th><th>Grade</th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="more"><span class="note">Showing ${shown.length} of ${list.length}, newest first. Speeds in Mbit/s; latency is idle latency.</span>${list.length > shown.length ? `<button class="sbtn" id="h-more">Show 50 more</button>` : ""}</div>`;
+  if (focus) $(`#${focus}`)?.focus({ preventScroll: true });
+}
+function exportCSV() {
+  const c = H.cur; if (!c) return;
+  const cols = ["id", "at", "series", "kind", "status", "download_mbps", "upload_mbps", "idle_ms", "loaded_down_ms", "loaded_up_ms", "jitter_ms", "bufferbloat_ms", "grade", "error_code", "error", "note"];
+  const q = (v) => (v == null ? "" : /[",\r\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+  const line = (r) => [r.id, new Date(r.at).toISOString(), SBY[r.series].name, SBY[r.series].kind === "schedule" ? "scheduled" : "browser", !r.ok ? "failed" : r.path_changed ? "path_changed" : "ok",
+    r.download_mbps, r.upload_mbps, r.idle_ms, r.loaded_down_ms, r.loaded_up_ms, r.jitter_ms, r.bufferbloat_ms, r.grade, r.error_code, r.error, r.note].map(q).join(",");
+  const blob = new Blob([[cols.join(","), ...c.rows.map(line)].join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `dyno-results-${iso(c.t0)}-to-${iso(c.t1)}.csv`;
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  $("#h-csvnote").textContent = `Downloaded ${a.download}: ${c.rows.length} rows, for the series shown.`;
+}
+function historyAfter(p) {
+  drawHistory();
+  new ResizeObserver(() => { const w = $("#hs").clientWidth; if (w && !p.hidden && Math.abs(w - H.w) > 30) drawHistory(); }).observe($("#hs"));
+  p.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.name === "h-range") { H.range = t.value; $("#h-dates").hidden = t.value !== "custom"; drawHistory(); }
+    else if (t.id === "h-from" || t.id === "h-to") { H[t.id === "h-from" ? "from" : "to"] = t.value; drawHistory(); }
+    else if (t.dataset.vis) { H.vis[t.dataset.vis] = t.checked; drawHistory(); }
+    else if (t.id === "h-only") { H.only = t.checked; H.rows = 25; drawTable("h-only"); }
+  });
+  p.addEventListener("click", (e) => {
+    if (e.target.closest("#h-csv")) return exportCSV();
+    if (e.target.closest("#h-more")) { H.rows += 50; return drawTable("h-more"); }
+    const j = e.target.closest("[data-jump]");
+    if (j) { H.hover = { i: nearest(Number(j.dataset.jump)), plot: "down" }; showHover(); $("#h-key").focus({ preventScroll: true }); scrollSheet($("#h-charts .hp"), "center"); }
+  });
+  const at = (e) => {
+    const el = e.target.closest?.(".hp");
+    if (!el || !H.cur) { if (e.type === "pointerdown" && H.hover && !e.target.closest?.("#h-key")) { H.hover = null; showHover(); } return; }
+    const r = el.getBoundingClientRect(), t = H.cur.t0 + ((e.clientX - r.left) / r.width) * (H.cur.t1 - H.cur.t0);
+    H.hover = { i: nearest(t), plot: el.dataset.k }; showHover();
+  };
+  p.addEventListener("pointermove", at); p.addEventListener("pointerdown", at);
+  p.addEventListener("pointerout", (e) => { if (e.pointerType !== "touch" && !e.relatedTarget?.closest?.(".hp") && document.activeElement?.id !== "h-key" && H.hover) { H.hover = null; showHover(); } });
+  p.addEventListener("keydown", (e) => {
+    if (e.target.id !== "h-key" || !H.cur) return;
+    const n = H.cur.rows.length, d = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 10, PageDown: -10 }[e.key];
+    let i = H.hover ? H.hover.i : n - 1;
+    if (d) i += d; else if (e.key === "Home") i = 0; else if (e.key === "End") i = n - 1; else return;
+    e.preventDefault(); H.hover = { i: Math.max(0, Math.min(n - 1, i)), plot: "down" }; showHover();
+  });
+  p.addEventListener("focusin", (e) => { if (e.target.id === "h-key" && !H.hover && H.cur?.rows.length) { H.hover = { i: H.cur.rows.length - 1, plot: "down" }; showHover(); } });
+  p.addEventListener("focusout", (e) => { if (e.target.id === "h-key" && H.hover) { H.hover = null; showHover(); } });
+}
+// ================= Monitor: scheduled tests (list, add, edit, pause, delete, live progress) =================
+const EVERY_OPTS = [["30m", "Every 30 minutes", 30 * 60e3], ["1h", "Every hour", HOUR], ["3h", "Every 3 hours", 3 * HOUR], ["6h", "Every 6 hours", 6 * HOUR], ["12h", "Every 12 hours", 12 * HOUR], ["d03", "Every day at 03:00", DAY]];
+const everyOf = (id) => EVERY_OPTS.find((o) => o[0] === id);
+const SCH = SCHEDULES.map((s) => ({ ...s, e: EVERY_OPTS.find((o) => o[1] === s.every)[0], where: SBY[s.id].where }));
+const TESTS = { light: "Light test", full: "Full test" };
+const GB = { light: 0.1, full: 0.66 }; // GB a test; placeholders for the estimate, because a light test's byte cap isn't set yet
+const sid = (s) => s.id.replace(/[^\w-]/g, "_");
+const runsPerMonth = (e) => (e === "d03" ? 30 : (30 * DAY) / everyOf(e)[2]);
+function cost(test, e) { const gb = GB[test] * runsPerMonth(e); return gb < 1 ? `${Math.round(gb * 1000)} MB` : gb < 100 ? `${gb.toFixed(gb < 10 ? 1 : 0)} GB` : `${(gb / 1000).toFixed(2)} TB`; }
+const SET = { digest: SETTINGS.digest, stopped: SETTINGS.scheduler_stopped_alert, keep: SETTINGS.keep_days };
+
+const LIVE = { on: false, id: "s-tailmeadow", t0: 0, i: -1, ph: "", played: false };
+const PH = { warm: "Warming up the path", latency: "Checking latency", download: "Measuring download", upload: "Measuring upload", done: "Finishing" };
+function setLiveUI(on) {
+  $("#tele-dot").style.visibility = on ? "visible" : "hidden"; // its space is always reserved, so nothing on the first screen moves
+  $("#tele-sr").textContent = on ? ", a scheduled test is running" : "";
+  $("#tab-monitor .dotslot").innerHTML = on ? `<span class="dot" aria-hidden="true"></span><span class="sr"> (a test is running)</span>` : "";
+}
+function playLive() {
+  const s = SCH.find((x) => x.id === LIVE.id); if (!s) return;
+  const tok = (LIVE.tok || 0) + 1; // one animation loop at a time, so a replay can't leave two running
+  Object.assign(LIVE, { on: true, tok, t0: performance.now(), i: -1, ph: "", played: true }); s.flash = null; s.paused = false;
+  setLiveUI(true); announce(`A scheduled test against ${s.far_end} has started.`);
+  renderSched(); requestAnimationFrame(() => tickLive(tok));
+}
+function tickLive(tok) {
+  if (!LIVE.on || tok !== LIVE.tok) return;
+  const i = Math.min(LIVE_RUN.length - 1, Math.floor((performance.now() - LIVE.t0) / 100));
+  if (i !== LIVE.i) { LIVE.i = i; paintLive(); }
+  if (i >= LIVE_RUN.length - 1) finishLive(); else requestAnimationFrame(() => tickLive(tok));
+}
+function paintLive() {
+  const f = LIVE_RUN[LIVE.i], n = $("#lv-n"); if (!n || LIVE.i < 0) return;
+  if (f.phase !== LIVE.ph) { LIVE.ph = f.phase; $("#lv-ph").textContent = PH[f.phase]; announce(`${PH[f.phase]}.`); }
+  n.textContent = f.phase === "download" || f.phase === "upload" ? fmt(f.mbps) : "–";
+  $("#lv-ms").textContent = fms(f.ms);
+  $("#lv-bar").style.width = `${(f.t / 14) * 100}%`; $("#lv-prog").setAttribute("aria-valuenow", f.t.toFixed(1));
+  $("#lv-spark").setAttribute("d", LIVE_RUN.slice(0, LIVE.i + 1).map((q, k) => `${k ? "L" : "M"}${((q.t / 14) * 140).toFixed(1)} ${(35 - Math.min(1, q.mbps / 500) * 33).toFixed(1)}`).join(""));
+}
+function finishLive() {
+  const s = SCH.find((x) => x.id === LIVE.id); LIVE.on = false; setLiveUI(false);
+  const avg = (ph, k, from) => { const a = LIVE_RUN.filter((f) => f.phase === ph && f.t >= from).map((f) => f[k]); return a.reduce((x, y) => x + y, 0) / a.length; };
+  if (s) {
+    const down = avg("download", "mbps", 4.5), up = avg("upload", "mbps", 9.5), idle = avg("latency", "ms", 0);
+    s.last = { series: s.id, at: NOW, ok: true, download_mbps: r1(down), upload_mbps: r1(up), idle_ms: r1(idle) }; s.next_at = NOW + everyOf(s.e)[2];
+    announce(`Scheduled test against ${s.far_end} finished: ${fmt(down)} megabits per second down, ${fmt(up)} up, ${fms(idle)} milliseconds idle latency.`);
+  }
+  renderSched();
+}
+function stopLive() {
+  const s = SCH.find((x) => x.id === LIVE.id), secs = LIVE_RUN[Math.max(0, LIVE.i)].t.toFixed(1); LIVE.on = false; setLiveUI(false);
+  if (s) { // a stopped test is kept as a failed run with its reason, like any other failure
+    s.last = { series: s.id, at: NOW, ok: false, error_code: "stopped", error: `You stopped this test after ${secs} s, so it has no result.` }; s.next_at = NOW + everyOf(s.e)[2];
+    s.flash = "Test stopped. It's kept as a failed run, and the next run is still on schedule.";
+  }
+  announce("Scheduled test stopped."); renderSched(() => $(`[data-id="${s?.id}"] [data-act="edit"]`));
+}
+
+const liveBox = () => `<div class="live-box" role="group" aria-label="Test running now"><div class="lv-row"><span class="lv-ph"><span class="dot" aria-hidden="true" style="margin:0 .55em 0 0"></span><span id="lv-ph">Warming up the path</span></span>
+    <span class="lv-n"><span id="lv-n">–</span><small>Mbit/s</small></span><span class="lv-n"><span id="lv-ms">–</span><small>ms</small></span><button class="sbtn" data-act="stop">Stop test</button></div>
+  <div class="lv-bar" id="lv-prog" role="progressbar" aria-label="Test progress, seconds of 14" aria-valuemin="0" aria-valuemax="14" aria-valuenow="0"><i id="lv-bar"></i></div>
+  <svg class="spark" viewBox="0 0 140 36" preserveAspectRatio="none" aria-hidden="true"><path d="M0 35.5H140" style="stroke:#2A2E36"/><path id="lv-spark" d=""/></svg>
+  <p class="note">This runs on its own, from this server to the far end. It doesn't use this page, and the speed test's number stays put.</p></div>`;
+const confirmBox = (s) => `<div class="frm" role="group" aria-label="Confirm delete"><p style="margin:0;font-size:14px;line-height:1.5">Delete the schedule for <b>${esc(s.far_end)}</b>? Its ${RESULTS.filter((r) => r.series === s.id).length} results stay in History. Nothing runs there again unless you add it back.</p>
+  <div class="frm-act"><button class="sbtn dbtn" data-act="confirm-delete">Delete schedule</button><button class="sbtn" data-act="keep">Keep it</button></div></div>`;
+function rowHTML(s) {
+  const run = LIVE.on && LIVE.id === s.id, l = s.last, t = everyOf(s.e), far = esc(s.far_end);
+  const last = !l ? `<span class="note">No runs yet. It appears in History after its first run.</span>`
+    : l.ok ? `<b>${fmt(l.download_mbps)}</b> Mbit/s down, <b>${fmt(l.upload_mbps)}</b> up, <b>${fms(l.idle_ms)}</b> ms<br><span class="note">${rel(l.at)}</span>`
+      : `<span class="tag fail">Failed</span> ${esc(l.error)}<br><span class="note">${rel(l.at)}</span>`;
+  const next = s.paused ? "Paused" : run ? "Running now" : s.next_at <= NOW + 45e3 ? "Starting now" : rel(s.next_at);
+  return `<li class="sc${run ? " running" : ""}${s.paused ? " paused" : ""}" data-id="${esc(s.id)}">
+    <div class="sc-top"><div class="sc-name"><b>${far}</b><span>${s.where ? `${esc(s.where)}. ` : ""}dyno ${esc(s.version)}</span></div>
+      <div class="sc-act"><button class="sbtn" data-act="edit" aria-expanded="${!!s.editing}" aria-label="Edit schedule for ${far}">Edit</button><button class="sbtn" data-act="pause" aria-label="${s.paused ? "Resume" : "Pause"} schedule for ${far}">${s.paused ? "Resume" : "Pause"}</button><button class="sbtn dbtn" data-act="delete" aria-label="Delete schedule for ${far}">Delete</button></div></div>
+    <dl class="sc-facts"><div><dt>Test</dt><dd>${TESTS[s.test]}<br><span class="note">${t[1]}</span></dd></div><div><dt>Last run</dt><dd>${last}</dd></div><div><dt>Next run</dt><dd>${next}</dd></div></dl>
+    ${run ? liveBox() : ""}${s.flash ? `<p class="stat ok" role="status">${esc(s.flash)}</p>` : ""}${s.confirm ? confirmBox(s) : ""}${s.editing ? schForm(s) : ""}</li>`;
+}
+function healthHTML() {
+  const on = SCH.filter((s) => !s.paused), lastAt = Math.max(0, ...SCH.map((s) => s.last?.at || 0));
+  if (!SCH.length) return `<span class="tag">No schedules</span> Nothing runs on its own yet.`;
+  if (!on.length) return `<span class="tag fail">All paused</span> No scheduled test will run until you resume one.`;
+  return `<span class="tag ok">Scheduler running</span> The last scheduled test finished ${rel(lastAt)}. ${SET.stopped ? "You'll get a message if scheduled tests stop." : "You won't be told if scheduled tests stop. Turn that on under Alerts."}`;
+}
+function renderSched(focus) {
+  const ul = $("#sched"); if (!ul) return;
+  ul.innerHTML = SCH.map(rowHTML).join("") || `<li class="note">No scheduled tests yet. Add one and dyno tests on its own, so the history fills in without anyone opening this page.</li>`;
+  $("#health").innerHTML = healthHTML();
+  if (LIVE.on) paintLive();
+  (typeof focus === "function" ? focus() : focus && $(focus))?.focus({ preventScroll: true });
+}
+function schForm(s) {
+  const k = s ? sid(s) : "add";
+  return `<form class="frm" data-form="${s ? esc(s.id) : "new"}" novalidate><h3>${s ? `Edit ${esc(s.far_end)}` : "Add a scheduled test"}</h3>
+    ${s ? `<p class="note">To test a different far end, add a new schedule. Changes apply at once, with no restart.</p>` : `<div class="field"><label for="${k}-addr">Far end address</label>
+      <input type="text" id="${k}-addr" data-addr inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="for example tailmeadow:3966" aria-describedby="${k}-hint ${k}-stat">
+      <p class="note" id="${k}-hint">A far end is another dyno you run somewhere else, such as on a VPS or at a relative's house. Scheduled tests run from this server to it. dyno never tests against a server someone else runs.</p><p class="stat" id="${k}-stat" aria-live="polite"></p></div>`}
+    <div class="frm-row"><fieldset class="field"><legend>Test</legend>
+      <label class="opt"><input type="radio" name="${k}-test" value="light"${!s || s.test === "light" ? " checked" : ""}>Light test<small>A short test with a byte cap. Kind to a line that isn't yours.</small></label>
+      <label class="opt" style="margin-top:8px"><input type="radio" name="${k}-test" value="full"${s?.test === "full" ? " checked" : ""}>Full test<small>The whole download and upload, about 20 seconds.</small></label></fieldset>
+      <div class="field"><label for="${k}-every">How often</label><select id="${k}-every">${options(EVERY_OPTS.map((o) => [o[0], o[1]]), s ? s.e : "3h")}</select><p class="note cost"></p></div></div>
+    <div class="frm-act"><button type="submit" class="pbtn"${s ? "" : " disabled"}>${s ? "Save changes" : "Save schedule"}</button><button type="button" class="sbtn" data-act="cancel">Cancel</button></div></form>`;
+}
+function costNote(f) {
+  const test = $("input[type=radio]:checked", f).value, e = $("select", f).value, id = f.dataset.form;
+  const far = id === "new" ? f.dataset.found || "the far end" : SCH.find((x) => x.id === id).far_end;
+  const big = GB[test] * runsPerMonth(e) > 100;
+  $(".cost", f).textContent = `About ${cost(test, e)} of test traffic a month on ${far}'s line.${big ? " That's a lot to put through someone else's line. A light test every few hours shows the same trend." : ""}`;
+}
+function checkAddr(v) {
+  const m = v.match(/^([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::(\d{1,5}))?$/);
+  if (!m) return { bad: "That isn't an address dyno can use. Type a host name or IP address, and a port if it isn't 3966, like tailmeadow:3966." };
+  const addr = `${m[1]}:${m[2] || "3966"}`;
+  if (/^bad|\.invalid$|nope/i.test(m[1])) return { bad: `Couldn't find a dyno at ${addr}. Check the address and the port, and that dyno is running there.` };
+  return { ok: addr };
+}
+let addrTimer = 0;
+const CHECK = { ms: 1000 }; // how long "Checking…" shows; a link can stretch it for review, as #monitor&add=nas.lan&check=6000
+function onAddr(inp) {
+  const f = inp.form, st = $(".stat", inp.closest(".field")), save = $(".pbtn", f), v = inp.value.trim();
+  clearTimeout(addrTimer); save.disabled = true; f.dataset.found = ""; inp.setAttribute("aria-invalid", "false"); costNote(f);
+  if (!v) { st.className = "stat"; st.textContent = ""; return; }
+  st.className = "stat wait"; st.textContent = "Checking…";
+  addrTimer = setTimeout(() => {
+    const r = checkAddr(v);
+    if (r.ok) {
+      const dup = SCH.some((s) => s.far_end === r.ok);
+      st.className = "stat ok"; st.textContent = `Found dyno v0.1.0 at ${r.ok}${dup ? ". You already test it, so saving replaces that schedule." : ""}`;
+      f.dataset.found = r.ok; save.disabled = false; costNote(f);
+    } else { st.className = "stat bad"; st.textContent = r.bad; inp.setAttribute("aria-invalid", "true"); }
+  }, CHECK.ms);
+}
+function saveForm(f) {
+  const id = f.dataset.form, test = $("input[type=radio]:checked", f).value, e = $("select", f).value;
+  if (id === "new") {
+    const addr = f.dataset.found; if (!addr) return;
+    const old = SCH.find((s) => s.far_end === addr);
+    if (old) Object.assign(old, { test, e, editing: false, flash: "Saved. It replaced the schedule you had for this far end." });
+    else SCH.push({ id: `s-${addr}`, far_end: addr, version: "v0.1.0", test, e, paused: false, last: null, next_at: NOW + 60e3, where: "", flash: "Saved. The first run starts in about a minute. No restart needed." });
+    $("#add-wrap").innerHTML = schForm(null); $("#add-wrap").hidden = true; $("#add-open").setAttribute("aria-expanded", "false");
+    const s = old || SCH.at(-1); announce(s.flash); renderSched(() => $(`[data-id="${s.id}"] [data-act="edit"]`));
+  } else {
+    const s = SCH.find((x) => x.id === id);
+    Object.assign(s, { test, e, editing: false }); s.next_at = Math.max(NOW + 60e3, (s.last?.at || NOW) + everyOf(e)[2]);
+    s.flash = `Saved. Next run ${rel(s.next_at)}. No restart needed.`; announce(s.flash); renderSched(() => $(`[data-id="${s.id}"] [data-act="edit"]`));
+  }
+}
+function schedClick(e) {
+  const b = e.target.closest("[data-act],#add-open"); if (!b) return;
+  if (b.id === "add-open") { const w = $("#add-wrap"); w.hidden = !w.hidden; b.setAttribute("aria-expanded", String(!w.hidden)); if (!w.hidden) { costNote($("form", w)); $("input[data-addr]", w).focus(); } return; }
+  const li = b.closest("li.sc"), s = li && SCH.find((x) => x.id === li.dataset.id), act = b.dataset.act, btn = (a) => () => $(`[data-id="${s?.id}"] [data-act="${a}"]`);
+  if (act === "cancel") { if (s) { s.editing = false; renderSched(btn("edit")); } else { $("#add-wrap").hidden = true; $("#add-open").setAttribute("aria-expanded", "false"); $("#add-open").focus(); } }
+  else if (act === "stop") stopLive();
+  else if (!s) return;
+  else if (act === "edit") { s.editing = !s.editing; s.confirm = false; s.flash = null; renderSched(() => (s.editing ? $("select", $(`[data-id="${s.id}"] form`)) : btn("edit")())); if (s.editing) costNote($(`[data-id="${s.id}"] form`)); }
+  else if (act === "pause") {
+    const going = LIVE.on && LIVE.id === s.id;
+    s.paused = !s.paused; s.flash = s.paused ? `Paused. ${going ? "The test running now will finish, and nothing runs after it" : "Nothing runs against this far end"} until you resume it. Its earlier results stay in History.` : `Resumed. Next run ${rel(s.next_at > NOW ? s.next_at : NOW + 60e3)}.`;
+    if (!s.paused && s.next_at <= NOW) s.next_at = NOW + 60e3; announce(s.flash); renderSched(btn("pause"));
+  } else if (act === "delete") { s.confirm = true; s.editing = false; renderSched(btn("keep")); }
+  else if (act === "keep") { s.confirm = false; renderSched(btn("delete")); }
+  else if (act === "confirm-delete") { SCH.splice(SCH.indexOf(s), 1); if (LIVE.on && LIVE.id === s.id) { LIVE.on = false; setLiveUI(false); } $("#sched-stat").textContent = `Deleted the schedule for ${s.far_end}. Its results stay in History.`; renderSched("#add-open"); }
+}
+// ================= Monitor: alerts, channels, digest, log, keep results =================
+const RULE = { metric: ALERT_RULE.metric, dir: "below", value: ALERT_RULE.below.percent_of_plan, unit: "percent", n: ALERT_RULE.in_a_row, retest: ALERT_RULE.retest, series: ALERT_RULE.series };
+const CHAN = CHANNELS.map((c, i) => ({ id: i + 1, ...c }));
+const KINDS = {
+  ntfy: ["ntfy", "https://ntfy.sh/your-topic", "dyno posts a short message to the topic. Use ntfy.sh or your own ntfy server."],
+  webhook: ["Webhook", "https://example.com/dyno-hook", "dyno sends a JSON POST to this address when an alert fires, recovers, or a digest is due."],
+  apprise: ["Apprise API", "http://apprise:8000/notify/your-key", "The address of your Apprise API. Apprise passes the message on to chat apps, email and the rest."],
+};
+const unitsFor = (m) => (m === "download" ? [["percent", "% of plan speed"], ["mbps", "Mbit/s"]] : m === "upload" ? [["mbps", "Mbit/s"]] : [["ms", "ms"]]);
+const LOGTAG = { fired: ["al", "Fired"], recovered: ["ok", "Recovered"], digest: ["", "Digest sent"] };
+function rulePlain() {
+  const what = { download: "download speed", upload: "upload speed", latency: "idle latency" }[RULE.metric];
+  const where = RULE.series === "all" ? "any far end's" : `${SBY[RULE.series].name}'s`;
+  const level = RULE.unit === "percent" ? `${RULE.value}% of your ${A.plan} Mbit/s plan (${Math.round((RULE.value / 100) * A.plan)} Mbit/s)` : RULE.unit === "mbps" ? `${RULE.value} Mbit/s` : `${RULE.value} ms`;
+  return `<b>In plain words:</b> you get one message when ${where} ${what} is ${RULE.dir} ${level} for ${RULE.n === 1 ? "one scheduled test" : `${RULE.n} scheduled tests in a row`}${RULE.retest ? ", after a quick retest of each one" : ""}. Then nothing more until it recovers, and one message when it does. Failed runs and path changes never count as slow.`;
+}
+function drawRule() {
+  const u = $("#r-unit"); if (!u) return;
+  u.innerHTML = options(unitsFor(RULE.metric), RULE.unit); $("#r-plain").innerHTML = rulePlain();
+}
+function onRule(t) {
+  if (t.id === "r-metric") { RULE.metric = t.value; [RULE.dir, RULE.value, RULE.unit] = { download: ["below", 80, "percent"], upload: ["below", 50, "mbps"], latency: ["above", 50, "ms"] }[t.value]; $("#r-dir").value = RULE.dir; $("#r-value").value = RULE.value; }
+  else if (t.id === "r-dir") RULE.dir = t.value;
+  else if (t.id === "r-value") RULE.value = Math.max(1, Number(t.value) || 1);
+  else if (t.id === "r-unit") RULE.unit = t.value;
+  else if (t.id === "r-n") RULE.n = Math.min(20, Math.max(1, Math.round(Number(t.value)) || 1));
+  else if (t.id === "r-series") RULE.series = t.value;
+  else if (t.id === "r-retest") RULE.retest = t.checked;
+  else return false;
+  drawRule(); $("#r-saved").textContent = "Saved. The rule applies from the next test, with no restart.";
+  if (BUILD.history) drawHistory();
+  return true;
+}
+const chanHTML = () => CHAN.map((c) => `<li><span class="kind">${KINDS[c.kind][0]}</span><span class="url">${esc(c.url)}</span>
+  <button class="sbtn" data-send="${c.id}" aria-label="Send a test to ${KINDS[c.kind][0]} at ${esc(c.url)}">Send a test</button><button class="sbtn dbtn" data-rm="${c.id}" aria-label="Remove the ${KINDS[c.kind][0]} channel at ${esc(c.url)}">Remove</button><p class="stat" id="ch-${c.id}" aria-live="polite"></p></li>`).join("")
+  || `<li class="note" style="border:0;padding:0;background:none">No channels yet. Without one, alerts only show in the log below.</li>`;
+function sendTest(id) {
+  const c = CHAN.find((x) => x.id === id), st = $(`#ch-${id}`); let host = c.url; try { host = new URL(c.url).host; } catch {}
+  st.className = "stat wait"; st.textContent = "Sending…";
+  setTimeout(() => {
+    const bad = /fail|nope|invalid/i.test(c.url);
+    st.className = `stat ${bad ? "bad" : "ok"}`;
+    st.textContent = bad ? `Couldn't send: ${host} answered 404 Not Found. Check the address, then try again.` : `Sent. A message that says “dyno test message” should reach ${KINDS[c.kind][0]} within a few seconds.`;
+  }, 900);
+}
+function addChan(f) {
+  const kind = $("#ch-kind").value, url = $("#ch-url").value.trim(), err = $("#ch-err"), inp = $("#ch-url");
+  let good = false; try { good = /^https?:$/.test(new URL(url).protocol); } catch {}
+  inp.setAttribute("aria-invalid", String(!good)); err.textContent = good ? "" : "That isn't a web address. Start it with http:// or https://, like https://ntfy.sh/your-topic.";
+  if (!good) return void inp.focus();
+  const id = Math.max(0, ...CHAN.map((c) => c.id)) + 1; CHAN.push({ id, kind, url });
+  $("#chn").innerHTML = chanHTML(); inp.value = ""; announce(`${KINDS[kind][0]} channel added. Use Send a test to check it.`); $(`[data-send="${id}"]`).focus();
+}
+const saved = (m) => { $("#al-saved").textContent = m; };
+function keepImpact() {
+  const mode = $("input[name=keep]:checked").value, n = Math.max(1, Math.round(Number($("#keep-n").value)) || 1);
+  const old = mode === "days" ? RESULTS.filter((r) => r.at < NOW - n * DAY).length : 0;
+  $("#keep-n").disabled = mode !== "days";
+  $("#keep-impact").textContent = mode === "forever" ? `Everything stays. dyno holds ${RESULTS.length} results from the last 30 days so far.`
+    : old ? `${old} of your ${RESULTS.length} results are older than ${n} days. They would be deleted at the next daily cleanup, and that can't be undone. Export a CSV from History first if you want a copy.`
+      : `Nothing is older than ${n} days yet, so nothing would be deleted today. Older results go at each daily cleanup.`;
+  $("#keep-save").disabled = mode === "forever" ? SET.keep == null : SET.keep === n;
+}
+function saveKeep() {
+  const mode = $("input[name=keep]:checked").value, n = Math.max(1, Math.round(Number($("#keep-n").value)) || 1);
+  SET.keep = mode === "forever" ? null : n; keepImpact();
+  $("#keep-saved").textContent = SET.keep == null ? "Saved. dyno keeps results forever." : `Saved. dyno keeps results for ${n} days.`;
+}
+function monitorHTML() {
+  const farEnds = SERIES.filter((s) => s.kind === "schedule");
+  return `<div class="mon">
+  <div class="jump" role="group" aria-label="Jump to a section"><span>Jump to</span><button class="sbtn" data-go="m-sched">Scheduled tests</button><button class="sbtn" data-go="m-alerts">Alerts</button><button class="sbtn" data-go="m-keep">Keep results</button></div>
+  <section class="sec first" id="m-sched" aria-labelledby="m-sched-h"><h2 id="m-sched-h">Scheduled tests</h2>
+    <p class="lead">dyno tests on its own, from this server to another dyno you run somewhere else, such as a VPS or a relative's house. Each far end gets its own line in History. Changes apply at once, with no restart.</p>
+    <p class="health" id="health"></p><ul class="sched" id="sched"></ul><p class="note" id="sched-stat" role="status"></p>
+    <div class="frm-act"><button class="sbtn" id="add-open" aria-expanded="false" aria-controls="add-wrap">Add a scheduled test</button></div><div id="add-wrap" hidden>${schForm(null)}</div></section>
+  <section class="sec" id="m-alerts" aria-labelledby="m-alerts-h"><h2 id="m-alerts-h">Alerts</h2>
+    <p class="lead">Alerts that don't nag: one message when a problem starts and one when it ends, not one per test.</p>
+    <h3>When to alert</h3>
+    <div class="frm" id="rule"><div class="frm-row">
+      <div class="field"><label for="r-metric">Watch</label><select id="r-metric">${options([["download", "Download speed"], ["upload", "Upload speed"], ["latency", "Idle latency"]], RULE.metric)}</select></div>
+      <div class="field"><label for="r-dir">Alert when it is</label><select id="r-dir">${options([["below", "Below"], ["above", "Above"]], RULE.dir)}</select></div>
+      <div class="field"><label for="r-value">Level</label><div style="display:grid;grid-template-columns:minmax(72px,.55fr) minmax(0,1.45fr);gap:8px"><input type="number" id="r-value" min="1" value="${RULE.value}" inputmode="decimal"><select id="r-unit" aria-label="Level unit"></select></div></div>
+      <div class="field"><label for="r-n">After this many tests in a row</label><input type="number" id="r-n" min="1" max="20" value="${RULE.n}"></div>
+      <div class="field"><label for="r-series">On</label><select id="r-series">${options([["all", "Every far end"], ...farEnds.map((s) => [s.id, s.name])], RULE.series)}</select></div></div>
+      <label class="opt"><input type="checkbox" id="r-retest"${RULE.retest ? " checked" : ""}>Retest once before counting a breach<small>If a test is past the level, dyno runs it again straight away. Only a second miss counts toward the row.</small></label>
+      <p class="plain" id="r-plain" aria-live="polite"></p>
+      <p class="note">The plan speed is set in <button class="tele-link" style="font-size:12.5px;padding:0" data-tab="setup">Setup</button>. <span class="stat ok" id="r-saved" role="status" style="min-height:0;font-size:12.5px"></span></p></div>
+    <h3>Where messages go</h3><ul class="chn" id="chn"></ul>
+    <form class="frm" id="ch-form" novalidate><h3>Add a channel</h3><div class="frm-row">
+      <div class="field"><label for="ch-kind">Type</label><select id="ch-kind">${options(Object.entries(KINDS).map(([k, v]) => [k, v[0]]), "ntfy")}</select></div>
+      <div class="field"><label for="ch-url">Address</label><input type="url" id="ch-url" placeholder="${KINDS.ntfy[1]}" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="ch-hint ch-err"><p class="note" id="ch-hint">${KINDS.ntfy[2]}</p><p class="stat bad" id="ch-err" aria-live="polite"></p></div></div>
+      <div class="frm-act"><button type="submit" class="pbtn">Add channel</button><span class="note">dyno sends messages only to the addresses you add here.</span></div></form>
+    <h3>Digest and silence</h3>
+    <div class="frm-row"><fieldset class="field"><legend>Digest</legend>${seg("digest", [["off", "Off"], ["daily", "Daily"], ["weekly", "Weekly"]], SET.digest)}<p class="note">One message that sums up the scheduled tests, so a bad week is one message and not one per test.</p></fieldset>
+      <div class="field"><label class="opt" style="margin-top:22px"><input type="checkbox" id="stopped"${SET.stopped ? " checked" : ""}>Tell me if scheduled tests stop<small>If no scheduled test finishes when one should have, you get one message. It catches a scheduler that died quietly.</small></label></div></div>
+    <p class="stat ok" id="al-saved" role="status"></p>
+    <h3>Alert log</h3><ul class="log">${ALERTS.slice().sort((a, b) => b.at - a.at).map((a) => `<li><span><span class="tag ${LOGTAG[a.kind][0]}">${LOGTAG[a.kind][1]}</span></span><time datetime="${new Date(a.at).toISOString()}">${fWhen(a.at)} UTC</time><span>${esc(a.text)}</span></li>`).join("")}</ul></section>
+  <section class="sec" id="m-keep" aria-labelledby="m-keep-h"><h2 id="m-keep-h">Keep results</h2>
+    <p class="lead">How long dyno keeps results on this server. Nothing is deleted unless you choose it.</p>
+    <fieldset class="field"><legend class="sr">Keep results for</legend>
+      <label class="opt"><input type="radio" name="keep" value="forever"${SET.keep == null ? " checked" : ""}>Forever<small>The default. Nothing is deleted.</small></label>
+      <div class="keep-row"><label class="opt"><input type="radio" name="keep" value="days"${SET.keep != null ? " checked" : ""}>For</label><input type="number" id="keep-n" min="1" max="3650" value="${SET.keep ?? 90}" aria-label="Number of days to keep results"><span>days</span></div></fieldset>
+    <p class="note" id="keep-impact" aria-live="polite"></p>
+    <div class="frm-act"><button class="pbtn" id="keep-save" disabled>Save</button><span class="stat ok" id="keep-saved" role="status"></span></div></section></div>`;
+}
+function monitorAfter(p) {
+  renderSched(); drawRule(); $("#chn").innerHTML = chanHTML(); keepImpact();
+  p.addEventListener("click", (e) => {
+    schedClick(e);
+    const go = e.target.closest("[data-go]"), snd = e.target.closest("[data-send]"), rm = e.target.closest("[data-rm]");
+    if (go) scrollSheet($(`#${go.dataset.go}`), "top");
+    if (snd) sendTest(Number(snd.dataset.send));
+    if (rm) { CHAN.splice(CHAN.findIndex((x) => x.id === Number(rm.dataset.rm)), 1); $("#chn").innerHTML = chanHTML(); announce("Channel removed."); $("#ch-kind").focus(); }
+    if (e.target.closest("#keep-save")) saveKeep();
+  });
+  p.addEventListener("input", (e) => { if (e.target.matches("[data-addr]")) onAddr(e.target); else if (e.target.id === "keep-n") { $("#keep-saved").textContent = ""; keepImpact(); } });
+  p.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.closest("form[data-form]") && !t.matches("[data-addr]")) costNote(t.closest("form"));
+    else if (onRule(t)) return;
+    else if (t.name === "digest") { SET.digest = t.value; saved(t.value === "off" ? "Saved. No digest." : `Saved. You'll get a ${t.value} digest.`); }
+    else if (t.id === "stopped") { SET.stopped = t.checked; $("#health").innerHTML = healthHTML(); saved(t.checked ? "Saved. You'll get one message if scheduled tests stop." : "Saved. dyno won't tell you if scheduled tests stop."); }
+    else if (t.name === "keep") { $("#keep-saved").textContent = ""; keepImpact(); }
+    else if (t.id === "ch-kind") { $("#ch-url").placeholder = KINDS[t.value][1]; $("#ch-hint").textContent = KINDS[t.value][2]; }
+  });
+  p.addEventListener("submit", (e) => { e.preventDefault(); if (e.target.id === "ch-form") addChan(e.target); else saveForm(e.target); });
+}
+HOOK.monitorOpened = () => { if (!LIVE.played) { LIVE.played = true; setTimeout(() => { if (!LIVE.on) playLive(); }, 700); } };
+
+// ================= boot =================
+const ft = $("#frame-t");
+ft.onclick = () => { const on = ft.getAttribute("aria-pressed") !== "true"; ft.setAttribute("aria-pressed", String(on)); stage.classList.toggle("phone", on); };
+$("#replay-t").onclick = () => playLive();
+// A link such as monitor-b.html#history opens that tab, and #monitor&add=tailmeadow:3966 also types an address into the add form, so a flow can be reviewed without typing.
+const [hash, ...opts] = location.hash.slice(1).split("&");
+for (const o of opts) { const [k, v] = o.split("="); if (k === "range" && ["24h", "7d", "30d", "custom"].includes(v)) H.range = v; else if (k === "from") H.from = v; else if (k === "to") H.to = v; } // e.g. #history&range=custom&from=2026-11-01&to=2026-11-07
+if (TABS.some(([k]) => k === hash)) openSheet(hash);
+const addArg = opts.find((x) => x.startsWith("add=")), checkArg = opts.find((x) => x.startsWith("check="));
+if (checkArg) CHECK.ms = Number(checkArg.slice(6)) || 1000;
+if (addArg) { openSheet("monitor"); $("#add-open").click(); const inp = $("input[data-addr]"); inp.value = decodeURIComponent(addArg.slice(4)); onAddr(inp); }
+//@@JS-BOOT@@
+</script>
+</body>
+</html>

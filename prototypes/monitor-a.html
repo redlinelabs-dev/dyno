@@ -1,0 +1,1781 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>dyno monitoring prototype A: Inside Telemetry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Big+Shoulders+Display:wght@600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* Prototype A, "Inside Telemetry": no new top-level screen. History and Setup inside the telemetry dialog take on monitoring.
+   The shell (bar, blurb, phone-frame toggle) is dyno-ui.html's. The stage is a container-query box, so the phone layout
+   follows the stage's width and the toggle shows it on a desktop. The look is the live app's (web/src/style.css). */
+*, *::before, *::after { box-sizing: border-box }
+:root {
+  --sh-bg: #E7EAEE; --sh-fg: #15171C; --sh-mute: #5B636F; --sh-line: #C9CFD7; --sh-on: #15171C; --sh-onfg: #F2EDE2;
+  --carbon: #15171C; --black: #0B0D11; --bone: #F2EDE2; --bezel: #D8DBE0; --red: #E3242B; --deep: #8E141B; --orange: #FF5A1F;
+  --bad: #FF6B63; --good: #5FD08A;
+  --f-num: "Big Shoulders Display", "Barlow", sans-serif; --f-ui: "Barlow", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root { --sh-bg: #0B0D11; --sh-fg: #E6E8EB; --sh-mute: #8B929D; --sh-line: #272B32; --sh-on: #F2EDE2; --sh-onfg: #15171C; color-scheme: dark } }
+body { margin: 0; background: var(--sh-bg); color: var(--sh-fg); font-family: var(--f-ui) }
+.shell { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 32px; display: grid; gap: 14px; max-width: 1240px; margin: 0 auto }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px }
+.ttl { font-size: 15px; font-weight: 600; margin: 0 }
+.ttl span { color: var(--sh-mute); font-weight: 400 }
+.bar .sp { flex: 1 }
+.bar .tag { font-size: 12px; color: var(--sh-mute) }
+.shell-btn { font: inherit; font-size: 13px; color: var(--sh-fg); background: none; border: 1px solid var(--sh-line); border-radius: 999px; padding: 6px 12px; cursor: pointer }
+.shell-btn[aria-pressed="true"] { background: var(--sh-on); color: var(--sh-onfg); border-color: var(--sh-on) }
+.blurb { margin: 0; font-size: 14.5px; color: var(--sh-mute); max-width: 120ch; line-height: 1.5 }
+#about { display: none }
+@media (max-width: 520px) {
+  .shell { padding-inline: 0; padding-block: 10px 0; gap: 10px }
+  .bar, .blurb { padding-inline: 14px }
+  #frame-t, .bar .tag { display: none }
+  #about { display: inline-block }
+  .blurb { display: none; font-size: 13px; line-height: 1.4 }
+  .blurb.open { display: block }
+}
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px }
+button { -webkit-tap-highlight-color: transparent; font-family: inherit }
+[hidden] { display: none !important }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
+
+/* ---------- the stage: the live app inside a box ---------- */
+.stage { --stage-h: max(700px, calc(100dvh - 150px)); /* sizeStage() sets the real height */ container: stage / inline-size; position: relative; height: var(--stage-h); border-radius: 18px; overflow: hidden; border: 1px solid var(--sh-line);
+  background: #0F1115; color: var(--bone); font-family: var(--f-ui); color-scheme: dark;
+  --mute: #8D929B; --line: #2A2E36; --face: #181A20; --s-panel: #15171C; --s-line: #2A2E36; --s-mute: #8D929B; --s-input: #0F1115;
+  --c-down: var(--red); --c-up: var(--bezel); --c-lat: var(--orange) }
+.stage.phone { --stage-h: min(844px, max(700px, calc(100dvh - 150px))); max-width: 410px; width: 100%; margin: 0 auto; border-radius: 36px; border: 10px solid var(--sh-on) } /* 390 px inside the frame */
+@media (max-width: 520px) { .stage { border-radius: 0; border-inline: 0; border-bottom: 0 } }
+
+/* ---------- first screen (a static copy of the live one) ---------- */
+.v { height: 100%; color: var(--bone); display: grid; grid-template: auto minmax(0, 1fr) / minmax(0, 1fr); justify-items: center; gap: 12px;
+  padding: 20px max(16px, 3cqi) 20px }
+.v-top { width: 100%; max-width: 1240px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; color: var(--mute) }
+.v-logo { display: flex; align-items: baseline; gap: 10px; margin: 0; font: inherit }
+.v-brand { font-family: var(--f-num); font-weight: 900; font-size: 24px; color: var(--bone); letter-spacing: .02em; font-style: italic; transform: skewX(-6deg) }
+.v-brand b { color: var(--red) }
+.v-by { font-size: 12px; color: var(--mute); letter-spacing: .02em }
+.v-host { min-width: 0; text-align: right; overflow-wrap: anywhere }
+.tele-link { font: inherit; font-size: max(13px, calc(14 * var(--p))); font-weight: 500; color: var(--mute); background: none; border: 0; padding: 8px 6px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px }
+.tele-link:hover { color: var(--bone) }
+.v-main { width: 100%; min-height: 0; display: grid; place-items: center }
+.fit { --p: 1px; width: calc(540 * var(--p)); display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center } /* the column is the dial's width, so a wider readout row overflows both sides, not just the right */
+.fit.row { width: auto; grid-template: 1fr auto auto auto 1fr / calc(540 * var(--p)) auto; column-gap: calc(48 * var(--p)) }
+.fit.row .f-dial { grid-area: 1 / 1 / -1 / 2; align-self: center }
+.fit.row .read { grid-area: 2 / 2; margin-top: 0 }
+.fit.row .f-act { grid-area: 3 / 2 }
+.fit.row .f-msg { grid-area: 4 / 2 }
+.f-dial { position: relative; width: 100% }
+.f-dial svg { display: block; width: 100%; height: auto; overflow: visible }
+.f-track { fill: none; stroke: #20232A; stroke-width: 16; stroke-linecap: round }
+.f-fill { fill: none; stroke: var(--bone); stroke-width: 16; stroke-linecap: round }
+.f-over { fill: none; stroke: var(--red); stroke-width: 16 }
+.f-zone { fill: none; stroke: var(--red); stroke-width: 3 }
+.f-tip { fill: var(--orange); stroke: #0F1115; stroke-width: 5 }
+.f-lab { fill: var(--mute); font-family: var(--f-num); font-weight: 700; font-size: 17px; text-anchor: middle; dominant-baseline: middle }
+.f-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; padding-top: 6% }
+.f-phase { font-size: max(12px, calc(14 * var(--p))); color: var(--mute); display: flex; align-items: center; gap: .5em }
+.f-val { font-family: var(--f-num); font-weight: 900; font-size: calc(168 * var(--p)); line-height: .88; font-variant-numeric: tabular-nums; letter-spacing: -.01em; --tn: .52em }
+.f-val.long { font-size: calc(116 * var(--p)) }
+.f-unit { font-family: var(--f-num); font-weight: 800; font-size: calc(34 * var(--p)); line-height: 1; letter-spacing: .02em; margin-top: calc(6 * var(--p)) }
+.tn { display: inline-block; width: var(--tn, .48em); text-align: center }
+.f-val.none, .rn b.none, .lg-n.none { color: #62666F }
+.read { display: grid; grid-template-columns: max-content max-content; justify-content: center; column-gap: calc(56 * var(--p)); margin-top: calc(-4 * var(--p)) }
+.rg { --rule: var(--c-lat); font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: left; cursor: pointer;
+  display: grid; grid-template-columns: max-content max-content; gap: 0 calc(36 * var(--p)); align-content: start }
+.rg.up { --rule: var(--c-up); grid-template-columns: max-content }
+.rg-h { grid-column: 1 / -1; font-size: max(14px, calc(16 * var(--p))); font-weight: 600; color: var(--bone); padding-bottom: .5em; margin-bottom: .62em; border-bottom: 2px solid var(--rule); transition: color .15s }
+.rg:hover .rg-h, .rg:focus-visible .rg-h { color: var(--rule) }
+.rv { display: grid; grid-template-columns: max-content max-content; align-items: baseline; column-gap: calc(5 * var(--p)); row-gap: 2px }
+.rl { grid-column: 1; text-align: right; font-size: max(12px, calc(14 * var(--p))); line-height: 1.4; min-height: 1.4em; color: var(--mute) }
+.rn { display: contents }
+.rn b { grid-row: 2; grid-column: 1; --tn: .52em; font-family: var(--f-num); font-weight: 900; font-size: calc(64 * var(--p)); line-height: .9; color: var(--bone); min-width: 1.6em; text-align: right }
+.rn b.wide { min-width: 2.38em }
+.rn small { grid-row: 2; grid-column: 2; font-size: max(12px, calc(15 * var(--p))); font-weight: 500; color: var(--mute) }
+.f-act { display: flex; gap: calc(14 * var(--p)); align-items: center; margin-top: calc(20 * var(--p)) }
+.go { font-size: max(14px, calc(15 * var(--p))); font-weight: 600; color: var(--carbon); background: var(--bone); border: 0; border-radius: 999px; padding: .73em 1.47em; cursor: pointer; min-width: 8.5em }
+.f-msg { margin: calc(12 * var(--p)) 0 0; max-width: 46ch; min-height: 2.9em; text-align: center; font-size: max(12.5px, calc(13.5 * var(--p))); line-height: 1.45; color: var(--mute) }
+.f-msg b { color: var(--bone); font-weight: 600 }
+.f-msg .m1 { display: block }
+.f-msg .m2 { display: block }
+.f-msg .pulse { display: inline-block; width: .5em; height: .5em; border-radius: 50%; background: var(--orange); margin-right: .55em; vertical-align: .08em; animation: blink 1s ease-in-out 5 } /* five blinks, then still: nothing blinks for more than 5 s (WCAG 2.2.2) */
+@keyframes blink { 50% { opacity: .2 } }
+.lnk { font: inherit; color: var(--bone); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: #5A5F69; text-underline-offset: 3px }
+.lnk:hover { text-decoration-color: var(--bone) }
+.f-msg .lnk { font-size: inherit }
+
+/* ---------- telemetry: a dialog on wide stages (ADR-0013), a sheet on narrow ones ---------- */
+.sheet-wrap { position: absolute; inset: 0; z-index: 5; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); align-items: end; justify-items: center }
+.sheet-back { position: absolute; inset: 0; background: rgb(5 6 8 / .62); border: 0; padding: 0; cursor: default }
+.sheet { --px: max(18px, 3cqi); position: relative; width: min(100%, 880px); height: calc(100% - 16px); overflow: auto; overscroll-behavior: none; background: var(--s-panel); color: var(--bone);
+  border: 1px solid var(--line); border-bottom: 0; border-radius: 20px 20px 0 0; padding: 10px var(--px) 40px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start;
+  animation: sheet-up .22s ease-out; font-family: var(--f-ui) }
+@keyframes sheet-up { from { translate: 0 40px; opacity: 0 } }
+@keyframes modal-in { from { opacity: 0; scale: .98 } }
+.sheet-grab { width: 40px; height: 4px; border-radius: 2px; background: #3A3E47; justify-self: center }
+.sheet-head { position: sticky; top: -10px; z-index: 3; margin: -6px calc(-1 * var(--px)) 0; padding: 16px var(--px) 8px; background: var(--s-panel); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: nowrap }
+.tabs { display: inline-flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0 }
+.tabs button { font-size: 14px; font-weight: 500; color: var(--mute); background: none; border: 1px solid transparent; border-radius: 999px; padding: 7px 13px; cursor: pointer; white-space: nowrap }
+.tabs button[aria-selected="true"] { color: var(--carbon); background: var(--bone) }
+.tabs .short { display: none }
+.sheet-x { font-size: 14px; color: var(--bone); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; cursor: pointer }
+@container stage (max-width: 480px) { .tabs button { padding: 7px 10px } .tabs .long { display: none } .tabs .short { display: inline } }
+@container stage (max-width: 400px) { .tabs { gap: 2px } .tabs button { padding: 7px 8px } .sheet-x { padding: 7px 12px } .sheet-head { gap: 8px } }
+@container stage (min-width: 700px) {
+  .sheet-wrap { align-items: center; padding: 24px }
+  .sheet-back { background: rgb(5 6 8 / .74) }
+  .sheet { --px: 30px; width: min(100%, 920px); height: auto; max-height: 100%; border-bottom: 1px solid var(--line); border-radius: 16px; padding: 22px var(--px) 30px; box-shadow: 0 30px 80px rgb(0 0 0 / .55); animation-name: modal-in; animation-duration: .16s }
+  .sheet-grab { display: none }
+  .sheet-head { top: -22px; margin: -22px calc(-1 * var(--px)) 0; padding: 22px var(--px) 12px }
+  .tabs { flex-wrap: wrap; overflow: visible }
+}
+#sheet-body { min-width: 0 }
+#sheet-body:focus-visible { outline-offset: 6px }
+
+/* ---------- form bits (as in the live Setup) ---------- */
+.pnlx { display: grid; gap: 16px; min-width: 0 }
+.note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--s-mute) }
+.setgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 22px }
+.field { display: grid; gap: 6px; align-content: start; border: 0; padding: 0; margin: 0; min-width: 0 }
+.field > label, .field > legend { font-size: 13px; color: var(--s-mute); padding: 0; margin-bottom: 6px }
+.field select, .field input:is([type="number"], [type="text"], [type="url"], [type="time"], [type="date"]) { font: inherit; font-size: 15px; background: var(--s-input); color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 8px 10px; min-width: 0; width: 100% }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--s-line); border-radius: 6px; overflow: hidden; width: fit-content }
+.seg label { position: relative; cursor: pointer; font-size: 14px }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
+.seg label > span { display: block; padding: 7px 13px }
+.seg input:checked + span { background: var(--deep); color: var(--bone) }
+.seg input:focus-visible + span { outline: 2px solid var(--orange); outline-offset: -3px }
+.exp { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center }
+.sbtn { font: inherit; font-size: 14px; background: none; color: var(--bone); border: 1px solid var(--s-line); border-radius: 6px; padding: 7px 12px; cursor: pointer }
+.sbtn:hover { border-color: #4A4F59 }
+.sbtn:disabled { opacity: .4; cursor: default }
+.sbtn.primary { background: var(--bone); color: var(--carbon); border-color: var(--bone); font-weight: 600 }
+.sbtn.danger { border-color: #6E2A2E; color: var(--bad) }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 9px 18px; margin: 0; font-size: 14.5px }
+.kv dt { color: var(--s-mute) } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-family: var(--f-num); font-size: 17px; font-weight: 700 }
+.tw { overflow-x: auto }
+.gradebox { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center }
+.grade { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 14px; background: var(--red); color: var(--bone); font-family: var(--f-num); font-weight: 900; font-size: 50px; line-height: 1 }
+.gradebox p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--s-mute) }
+.gradebox p b { color: var(--bone); font-weight: 600; display: block; margin-bottom: 2px }
+.latgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px 36px }
+@container stage (max-width: 640px) { .latgrid { grid-template-columns: 1fr } }
+.lg { --face: #0F1115; display: grid; justify-items: center; gap: 2px; align-content: start }
+.lg svg { display: block; width: min(100%, 300px); height: auto; overflow: visible }
+.lg-read { font-family: var(--f-num); font-weight: 800; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; margin-top: 6px }
+.lg-n { display: inline-block; min-width: 1.5em; text-align: center }
+.lg-read small { font-family: var(--f-ui); font-size: 13px; font-weight: 500; color: var(--s-mute); margin-left: 4px }
+.lg-busy { font-size: 13px; color: var(--orange); min-height: 1.4em }
+.latside { display: grid; gap: 22px; align-content: start }
+.g-tick { stroke: var(--bone) } .g-tick.minor { stroke: var(--mute) }
+.g-lab { fill: var(--bone); font-family: var(--f-num); font-weight: 800; text-anchor: middle; dominant-baseline: middle }
+.g-red { fill: none; stroke: var(--red) }
+.g-ndl { fill: var(--orange) }
+.g-hub { fill: var(--black); stroke: var(--orange) }
+.g-needle, .g-ghost { transform-box: view-box; transition: transform .16s linear }
+.g-ghost line { stroke: var(--orange); opacity: .55 }
+
+/* ---------- chart pieces (the live app's ADR-0012 look) ---------- */
+.ch-plot { position: relative; height: var(--ph, 140px); margin-left: 40px; margin-right: 6px; touch-action: pan-y; cursor: crosshair }
+.ch-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible }
+.ch-g { stroke: #22252C; stroke-width: 1; vector-effect: non-scaling-stroke; shape-rendering: crispEdges }
+.ch-g.ch-base { stroke: #3A3E47 }
+.ch-warm { fill: var(--bone); fill-opacity: .035 }
+.ch-l { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke }
+.ch-a { stroke: none }
+.ch-l.down, .ch-ref.down { stroke: var(--c-down) } .ch-a.down { fill: url(#ch-gd) } .ch-gd stop { stop-color: var(--c-down) }
+.ch-l.up, .ch-ref.up { stroke: var(--c-up) } .ch-a.up { fill: url(#ch-gu) } .ch-gu stop { stop-color: var(--c-up) }
+.ch-l.lat, .ch-ref.lat { stroke: var(--c-lat) } .ch-a.lat { fill: url(#ch-gl) } .ch-gl stop { stop-color: var(--c-lat) }
+.ch-a-def stop:first-child { stop-opacity: .26 } .ch-a-def stop:last-child { stop-opacity: .02 }
+.ch-ref { stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke }
+.ch-y { position: absolute; right: calc(100% + 8px); transform: translateY(50%); font-size: 11.5px; line-height: 1; color: var(--s-mute); font-variant-numeric: tabular-nums; white-space: nowrap }
+.ch-xa { position: relative; height: 20px; margin-left: 40px; margin-right: 6px; font-size: 11.5px; color: var(--s-mute); font-variant-numeric: tabular-nums }
+.ch-xt { position: absolute; top: 6px; transform: translateX(-50%); white-space: nowrap }
+.ch-xt.first { transform: none } .ch-xt.last { transform: translateX(-100%) }
+.ch-rl { position: absolute; white-space: nowrap; pointer-events: none; margin: 0 0 4px 8px; font-size: 11.5px; color: var(--bone); font-variant-numeric: tabular-nums; text-shadow: 0 0 4px var(--s-panel), 0 0 2px var(--s-panel) }
+.ch-rl.end { margin: 0 0 4px -8px; transform: translateX(-100%) }
+.ch-lg { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 13px }
+.ch-lg th, .ch-lg td { padding: 6px 0 6px 16px; text-align: right; border-bottom: 1px solid var(--s-line) }
+.ch-lg thead th, .ch-lg thead td { padding-top: 0; font-size: 12px; font-weight: 500; color: var(--s-mute) }
+.ch-lg tbody th { font-weight: 500 }
+.ch-lg.named tr > :first-child { width: 100%; padding-left: 0; text-align: left }
+.ch-lg td { font-family: var(--f-num); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums }
+.ch-k { display: inline-block; width: 14px; height: 2px; border-radius: 1px; margin-right: 8px; vertical-align: middle }
+.ch-k.down { background: var(--c-down) } .ch-k.up { background: var(--c-up) } .ch-k.lat { background: var(--c-lat) }
+.ch-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px }
+.ch-head h2 { margin: 0; font-size: 14px; font-weight: 600 }
+.ch-head span { font-size: 12.5px; color: var(--s-mute) }
+
+/* ---------- History: the range picker, the lines to show, three plots on one time axis, stats, the table ---------- */
+.hist-panel { container: hist / inline-size; display: grid; gap: 18px; min-width: 0 }
+.hh { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 16px }
+.hh-r { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px }
+/* In the dialog the range picker stays under the tabs while the plots scroll, so the one picker is always in reach. */
+@container stage (min-width: 700px) { .hh { position: sticky; top: 45px; z-index: 2; background: var(--s-panel); padding: 8px 0; margin: -8px 0 } }
+.rng { display: block }
+#h-exp:empty { display: none }
+::placeholder { color: var(--s-mute); opacity: 1 }
+.seg .short { display: none }
+@container hist (max-width: 520px) { .seg .long { display: none } .seg .short { display: inline } .seg label > span { padding: 7px 11px } }
+.cust { display: flex; flex-wrap: wrap; align-items: start; gap: 10px 14px }
+.cust .field { width: 12.5em }
+.cust input[type="date"] { color-scheme: dark }
+.err { margin: 0; font-size: 13px; color: var(--bad); align-self: center; flex: 1 1 14em }
+.err:empty { display: none }
+#h-live:empty { display: none }
+#h-out, #h-table { display: grid; gap: 14px; min-width: 0 }
+#h-out { gap: 18px }
+.who { min-width: 0 }
+.who > summary { list-style: none; display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 9px 0; border-bottom: 1px solid var(--s-line); font-size: 13px; color: var(--s-mute) }
+.who > summary::-webkit-details-marker { display: none }
+.who-t { color: var(--bone); font-size: 14px; font-weight: 500; white-space: nowrap }
+.who-s { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.who-c { flex: none; width: 16px; height: 16px; transition: rotate .15s }
+.who[open] .who-c { rotate: 180deg }
+.who-b { display: grid; gap: 8px; padding-top: 12px }
+.grp { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
+.grp-l { font-size: 12.5px; color: var(--s-mute); width: 62px; flex: none }
+@container hist (max-width: 520px) { .grp-l { width: 100% } }
+.chip { position: relative; cursor: pointer }
+.chip input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; width: 100%; height: 100% }
+.chip > span { display: flex; align-items: center; gap: 8px; border: 1px solid var(--s-line); border-radius: 999px; padding: 6px 12px 6px 10px; font-size: 14px; color: var(--bone) }
+.chip small { font-size: 12px; color: var(--s-mute) }
+.chip input:checked + span { background: var(--deep); border-color: var(--deep) }
+.chip input:checked + span small { color: var(--bone); opacity: .85 }
+.chip input:focus-visible + span { outline: 2px solid var(--orange); outline-offset: 2px }
+.sw { flex: none; display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--c); background: transparent }
+.chip input:checked + span .sw { background: var(--c) }
+.sw.sm { width: 10px; height: 10px; background: var(--c); margin-right: 8px; vertical-align: -1px }
+.charts { display: grid; gap: 24px; position: relative }
+#h-key:focus-visible + .charts { outline: 2px solid var(--orange); outline-offset: 8px; border-radius: 4px }
+.cp { display: grid; gap: 8px; min-width: 0 }
+.cp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px }
+.cp-head h2 { margin: 0; font-size: 14px; font-weight: 600; padding-bottom: 4px; border-bottom: 2px solid var(--rule, var(--s-line)) }
+.cp-head span { font-size: 12.5px; color: var(--s-mute) }
+.cp-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px 24px; align-items: start }
+@container hist (min-width: 760px) { .cp-body { grid-template-columns: minmax(0, 1fr) 290px } .cp-stats .ch-lg { margin-top: 0 } }
+.ch-plot[data-plot="down"] { --ph: 150px }
+.ch-plot[data-plot="up"], .ch-plot[data-plot="lat"] { --ph: 120px }
+@container hist (max-width: 520px) { .ch-plot[data-plot="down"] { --ph: 140px } .ch-plot[data-plot="up"], .ch-plot[data-plot="lat"] { --ph: 110px } }
+.ln { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke }
+.ln.dev { stroke-width: 1.5; stroke-dasharray: 5 4 }
+.mk { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1.5px var(--s-panel); pointer-events: none }
+.mk.path { width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 2px; rotate: 45deg; background: var(--s-panel); border: 2px solid var(--bone); box-shadow: none }
+.band { position: absolute; top: 0; bottom: 0; translate: -50% 0; min-width: 6px; pointer-events: none; background: repeating-linear-gradient(135deg, rgb(255 107 99 / .36) 0 1.5px, rgb(255 107 99 / .1) 1.5px 5px) }
+.al { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--c); opacity: .8; pointer-events: none }
+.al.fired { --c: var(--orange) } .al.rec { --c: var(--good) }
+.ch-ov { position: absolute; inset: 0; pointer-events: none }
+.ch-cross { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -.5px; background: var(--bone); opacity: .5; pointer-events: none }
+.ch-dot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid var(--bone); background: var(--c); pointer-events: none }
+.ch-tip { position: absolute; top: 8px; z-index: 1; width: max-content; max-width: 280px; padding: 9px 12px; background: #0F1115; border: 1px solid var(--s-line); border-radius: 6px; box-shadow: 0 8px 20px rgb(0 0 0 / .45); font-size: 12.5px; line-height: 1.4; pointer-events: none }
+.ch-tip p { margin: 0 0 5px; color: var(--s-mute) }
+.ch-tip p:last-child { margin-bottom: 0 }
+.ch-tip .tt { display: flex; flex-wrap: wrap; align-items: center }
+.ch-tip .tt b { color: var(--bone); font-weight: 600; margin-right: 8px }
+.ch-tip .tt .sw { margin-right: 8px }
+.ch-tip .tg { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 8px }
+.ch-tip .tg svg { width: 12px; height: 12px }
+.ch-tip .tg.fired { color: var(--orange) } .ch-tip .tg.rec { color: var(--good) }
+.ch-tip ul { display: grid; gap: 2px; margin: 0 0 6px; padding: 0; list-style: none; color: var(--s-mute) }
+.ch-tip li b { font-family: var(--f-num); font-size: 17px; font-weight: 700; color: var(--bone); font-variant-numeric: tabular-nums }
+.ch-tip .tx { color: var(--bone) }
+.ch-tip .tx.bad b { color: var(--bad) }
+.ch-tip .tx.slow b { color: var(--orange) }
+.ev-lane { position: relative; height: 30px; margin: 0 6px 0 40px; border-bottom: 1px solid #3A3E47 }
+.ev { position: absolute; top: 3px; translate: -50% 0; z-index: 1; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--s-panel); border: 1.5px solid currentColor; cursor: pointer }
+.ev svg { width: 12px; height: 12px }
+.ev-fail { color: var(--bad) }
+.ev-fail.multi { width: auto; min-width: 22px; padding: 0 7px 0 6px; grid-auto-flow: column; gap: 3px; border-radius: 11px }
+.ev-fail.multi b { font: 700 12px var(--f-ui); color: var(--bone) }
+.ev-path { color: var(--bone) }
+.ev-fired { color: var(--orange) } .ev-rec { color: var(--good) }
+.ev-bar { position: absolute; top: 13px; height: 2px; background: linear-gradient(90deg, var(--orange), var(--good)); opacity: .75 }
+.ev-tick { position: absolute; bottom: -1px; width: 2px; height: 6px; margin-left: -1px; background: currentColor }
+.key { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; color: var(--s-mute); align-content: start }
+.key li { display: flex; align-items: center; gap: 8px }
+.key b { color: var(--bone); font-weight: 600 }
+.kg { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid currentColor; display: grid; place-items: center }
+.kg svg { width: 11px; height: 11px }
+.kg.fail { color: var(--bad) } .kg.path { color: var(--bone) } .kg.fired { color: var(--orange) } .kg.rec { color: var(--good) }
+.kg + .kg { margin-left: -4px }
+.cp-ev .note { margin-top: 8px }
+.cp-ev { scroll-margin-top: 80px }
+@container hist (max-width: 759px) { .key { margin-top: 8px } }
+.st th small { display: block; margin-top: 1px; font-size: 12px; font-weight: 400; color: var(--s-mute) }
+.st td.none { font-family: var(--f-ui); font-size: 13px; font-weight: 400; color: var(--s-mute); text-align: left }
+.st .sw.sm { margin-right: 8px }
+.tbl-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px }
+.tbl-h h2 { margin: 0; font-size: 14px; font-weight: 600 }
+.ck { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; font-size: 14px; cursor: pointer }
+.ck input { width: 18px; height: 18px; margin: 0; accent-color: var(--red); cursor: pointer }
+.ck small { font-size: 12.5px; color: var(--s-mute) }
+.hist { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums }
+.hist th { text-align: left; font-weight: 500; color: var(--s-mute); font-size: 12.5px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--s-line) }
+.hist td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--s-line); white-space: nowrap; vertical-align: top }
+.hist td.n { font-family: var(--f-num); font-weight: 700; font-size: 16px }
+.hist td.from, .hist .dev { white-space: normal; overflow-wrap: anywhere }
+.hist .dev { display: block; margin-top: 3px; font-size: 12.5px; color: var(--s-mute) }
+.hist tr.bad td { background: rgb(255 107 99 / .07) }
+.hist td.why { white-space: normal; line-height: 1.4 }
+.hist td.why b { color: var(--bad); font-weight: 600 }
+.hist tr.note-row td { padding: 0 10px 10px 0; white-space: normal; font-size: 13px; line-height: 1.4; color: var(--s-mute) }
+.hist tr.has-note td { border-bottom-color: transparent }
+.hist td.when span:not(.dev) { white-space: nowrap }
+.tag { display: inline-block; font-size: 12px; line-height: 1.5; border-radius: 999px; padding: 1px 9px; border: 1px solid var(--s-line); color: var(--bone); white-space: nowrap }
+.tag.path { border-color: #6F737C } .tag.slow { border-color: #7A3A1F; color: #FF9A73 }
+.hist td.when .tag { margin-top: 5px }
+.tbl-n { display: none }
+@container hist (max-width: 620px) { .tbl-w { display: none } .tbl-n { display: block } .hist { font-size: 13.5px } }
+.tbl-f { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px }
+.empty { margin: 0; padding: 26px 0; text-align: center; font-size: 14px; color: var(--s-mute) }
+/* ---------- Setup: the live fields, then "On this server": scheduled tests, alerts, keep results ---------- */
+.tabs { padding: 4px; margin: -4px }
+.mon { display: grid; gap: 10px; padding-top: 8px; min-width: 0 }
+.mon-h { margin: 6px 0 0; font-size: 14px; font-weight: 600 }
+.ac { border: 1px solid var(--s-line); border-radius: 10px; min-width: 0 }
+.ac > summary { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 14px; padding: 14px 16px; cursor: pointer; border-radius: 10px }
+.ac > summary::-webkit-details-marker { display: none }
+.ac-t { font-size: 15px; font-weight: 600 }
+.ac-s { font-size: 13px; color: var(--s-mute); min-width: 0 }
+.ac-c { width: 18px; height: 18px; color: var(--s-mute); transition: rotate .15s }
+.ac[open] > summary { border-bottom: 1px solid var(--s-line); border-radius: 10px 10px 0 0 }
+.ac[open] .ac-c { rotate: 180deg }
+.ac-b { padding: 18px 16px 20px; display: grid; gap: 22px; min-width: 0 }
+@container stage (max-width: 480px) {
+  .ac > summary { grid-template-columns: minmax(0, 1fr) auto }
+  .ac-s { grid-column: 1; grid-row: 2 }
+  .ac-c { grid-column: 2; grid-row: 1 / span 2 }
+  .ac-b { padding: 16px 12px 18px }
+}
+.sec { display: grid; gap: 12px; min-width: 0 }
+.sec > h3 { margin: 0; font-size: 14px; font-weight: 600 }
+.sch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px }
+.sch { border: 1px solid var(--s-line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 12px; background: #12141A; min-width: 0 }
+.sch:focus-visible { outline-offset: 3px }
+.sch.paused { border-style: dashed }
+.sch-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px }
+.sch-n { margin: 0 6px 0 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere }
+.sch-kv { display: grid; gap: 7px; margin: 0; font-size: 14px }
+.sch-kv > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0 12px }
+@container stage (max-width: 480px) { .sch-kv > div { grid-template-columns: 1fr; gap: 1px } }
+.sch-kv dt { color: var(--s-mute); font-size: 13px }
+.sch-kv dd { margin: 0; line-height: 1.4 }
+.sch-kv b { font-family: var(--f-num); font-size: 16px; font-weight: 700 }
+.sch-kv .when { color: var(--s-mute); font-size: 13px; white-space: nowrap }
+.sch-kv .bad { color: var(--bad); font-weight: 600 }
+.sch-kv .live { color: var(--orange) }
+.sch-act { display: flex; flex-wrap: wrap; gap: 8px }
+.sch-prog { height: 4px; border-radius: 2px; background: #20232A; overflow: hidden }
+.sch-prog i { display: block; height: 100%; width: 0; background: var(--orange) }
+.sch-form, .add-form { display: grid; gap: 14px }
+.add-form { border: 1px solid var(--s-line); border-radius: 10px; padding: 16px; margin-top: 12px }
+.add-form h3 { margin: 0; font-size: 15px; font-weight: 600 }
+#add-more { display: grid; gap: 14px }
+.pair { grid-template-columns: 5.2em minmax(0, 1fr) !important }
+.conf { margin: 0; font-size: 14px; line-height: 1.45 }
+.conf b { font-weight: 600 }
+.tag.pause { border-color: #7A6A1F; color: #F2D56B }
+.sch-top .tag.live { border-color: #7A3A1F; color: #FF9A73 }
+.chk { margin: 0; display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; line-height: 1.4; color: var(--s-mute) }
+.chk:empty { display: none }
+.chk svg { flex: none; width: 16px; height: 16px; margin-top: 1px }
+.chk.ok { color: var(--good) } .chk.err { color: var(--bad) } .chk.busy { color: var(--bone) }
+.spin { flex: none; width: 14px; height: 14px; margin-top: 2px; border-radius: 50%; border: 2px solid #4A4F59; border-top-color: var(--bone); animation: spin .8s linear infinite }
+@keyframes spin { to { rotate: 360deg } }
+.pair { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr); gap: 8px }
+.rule-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) }
+.rule-text { margin: 0; padding: 12px 14px; border-left: 3px solid var(--orange); background: #12141A; border-radius: 0 8px 8px 0; font-size: 14px; line-height: 1.5 }
+.chan { display: grid; gap: 6px }
+.chan-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px }
+@container stage (max-width: 480px) { .chan-row { grid-template-columns: 1fr } .chan-row .sbtn { justify-self: start } }
+.field .ck, .sec > .ck { align-self: start }
+.alog { list-style: none; margin: 0; padding: 0 }
+.alog li { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 4px 14px; padding: 12px 0; border-bottom: 1px solid var(--s-line) }
+.alog li:first-child { padding-top: 0 }
+@container stage (max-width: 480px) { .alog li { grid-template-columns: 1fr } }
+.lk { align-self: start; justify-self: start; font-size: 12.5px; font-weight: 600; border-radius: 999px; padding: 2px 10px; border: 1px solid currentColor }
+.lk.fired { color: var(--orange) } .lk.recovered { color: var(--good) } .lk.digest { color: var(--s-mute) }
+.alog p { margin: 0; font-size: 14px; line-height: 1.45 }
+.alog .al-t { color: var(--s-mute); font-size: 13px; margin-bottom: 2px }
+.alog .lnk { margin-top: 6px; font-size: 13px; color: var(--bone) }
+.when { color: var(--s-mute) }
+/* ---------- Live progress in History: the strip at the top ---------- */
+.pulse { display: inline-block; width: .5em; height: .5em; border-radius: 50%; background: var(--orange); margin-right: .55em; vertical-align: .08em; animation: blink 1s ease-in-out 5 }
+.lv { border: 1px solid #7A3A1F; background: #1A1512; border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 8px 16px; align-items: center }
+@container hist (max-width: 520px) { .lv { grid-template-columns: minmax(0, 1fr) } }
+.lv.done { border-color: #1F5A3A; background: #111A15 }
+.lv-t { margin: 0; font-size: 14px }
+.lv-t b { font-weight: 600 }
+.lv-x { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--s-mute) }
+.lv-x b { color: var(--bone); font-family: var(--f-num); font-size: 16px }
+.lv-ph { display: flex; flex-wrap: wrap; gap: 2px 12px; list-style: none; margin: 6px 0 0; padding: 0; font-size: 12.5px; color: var(--s-mute) }
+.lv-ph li.now { color: var(--bone); font-weight: 600 }
+.lv-n { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 8px; font-family: var(--f-num); font-weight: 800; font-size: 30px; line-height: 1; --tn: .52em }
+.lv-n small { font: 500 13px var(--f-ui); color: var(--s-mute); margin-left: 5px }
+.lv-c svg { display: block; width: 100%; height: 48px; overflow: visible }
+.lv-c path { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round }
+.lv-c .d { stroke: var(--c-down) } .lv-c .u { stroke: var(--c-up) }
+.lv .sch-prog { grid-column: 1 / -1 }
+@media (prefers-reduced-motion: reduce) { .g-needle, .g-ghost { transition: none } .sheet { animation: none } .pulse, .f-msg .pulse, .spin { animation: none } .ac-c, .who-c { transition: none } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="bar">
+    <p class="ttl">dyno monitoring <span>A, Inside Telemetry</span></p>
+    <span class="sp"></span>
+    <span class="tag">Simulated data. Now is Nov 13, 18:00 UTC.</span>
+    <button class="shell-btn" id="replay" type="button">Replay scheduled test</button>
+    <button class="shell-btn" id="about" type="button" aria-expanded="false" aria-controls="blurb">About</button>
+    <button class="shell-btn" id="frame-t" type="button" aria-pressed="false">Phone frame</button>
+  </div>
+  <p class="blurb" id="blurb">Inside Telemetry adds nothing at the top level: History gains the range picker, the charts and the stats, and Setup gains Scheduled tests, Alerts and Keep results. A scheduled test that is running shows in the first screen's message line and links to History; Replay runs it again. Open Telemetry, then try History (hover a failed run, or step through the tests with the arrow keys) and Setup. The question it answers: does the dialog hold a month of history and still read well, in a window and in the phone frame?</p>
+  <div class="stage" id="stage"></div>
+</div>
+
+<script>
+"use strict";
+// ---- Shared simulated data for the monitoring prototypes. Pasted verbatim into each; don't edit. ----
+// A fixed seed and a fixed "now", so every prototype shows the same 30 days. Treat NOW as the
+// current time everywhere ("2 h ago", "next run in 47 min"); never use Date.now().
+const NOW = Date.parse("2026-11-13T18:00:00Z");
+const HOUR = 3600e3, DAY = 24 * HOUR;
+const PLAN_MBPS = 500; // the plan speed the owner entered in Setup; the dial's red zone starts here
+
+function mulberry32(a) {
+  return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const rnd = mulberry32(20261113);
+const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+const r1 = (v) => Math.round(v * 10) / 10;
+const grade = (added) => (added < 10 ? "A+" : added < 20 ? "A" : added < 50 ? "B" : added < 100 ? "C" : added < 500 ? "D" : "F");
+
+// One series per far end (scheduled tests) and one per device (tests run in a browser, ADR-0022).
+const SERIES = [
+  { id: "s-tailmeadow", kind: "schedule", name: "tailmeadow", where: "A dyno at a relative's house, over the internet" },
+  { id: "s-nas", kind: "schedule", name: "nas", where: "A dyno on the home LAN" },
+  { id: "d-edge", kind: "device", name: "Edge on Windows" },
+  { id: "d-iphone", kind: "device", name: "Safari on iPhone" },
+  { id: "d-ipad", kind: "device", name: "Kitchen iPad" },
+];
+
+function ok(series, at, down, up, idle, busyDown, busyUp, extra) {
+  const added = Math.max(busyDown, busyUp) - idle;
+  return { series, at, ok: true, download_mbps: r1(down), upload_mbps: r1(up), idle_ms: r1(idle), loaded_down_ms: r1(busyDown),
+    loaded_up_ms: r1(busyUp), jitter_ms: r1(0.2 + Math.abs(gauss()) * idle * 0.08), bufferbloat_ms: r1(added), grade: grade(added), ...extra };
+}
+const fail = (series, at, code, reason) => ({ series, at, ok: false, error_code: code, error: reason });
+
+const RESULTS = []; // oldest first
+// tailmeadow: a light test every 3 hours. Its line is capped by the far end's own upstream, so ~440 down.
+for (let t = Math.ceil((NOW - 30 * DAY) / (3 * HOUR)) * 3 * HOUR; t <= NOW - 2 * HOUR; t += 3 * HOUR) {
+  const ago = (NOW - t) / DAY, hour = new Date(t).getUTCHours();
+  const evening = hour >= 18 ? 0.92 : 1;
+  if (ago > 11.85 && ago < 12.2) { RESULTS.push(fail("s-tailmeadow", t, "unreachable", "Couldn't reach tailmeadow:3966: the connection timed out. Either end, or the internet between them, may have been down.")); continue; }
+  if (ago > 4.9 && ago < 5.05) { RESULTS.push(fail("s-tailmeadow", t, "stream_failed", "The download broke off after 2.1 s: tailmeadow closed the connection.")); continue; }
+  if (ago > 7.95 && ago < 8.1) { RESULTS.push(ok("s-tailmeadow", t, 310, 71, 86, 141, 152, { path_changed: true, note: "Latency was 86 ms against tailmeadow's usual 18 ms, so the test probably ran over a relay before a direct path formed. Not counted as slow." })); continue; }
+  if (ago > 2.45 && ago < 3.3) { RESULTS.push(ok("s-tailmeadow", t, 175 + gauss() * 12, 88 + gauss() * 3, 21 + Math.abs(gauss()), 96 + gauss() * 8, 64, { breach: true, retested: true })); continue; }
+  RESULTS.push(ok("s-tailmeadow", t, (440 + gauss() * 14) * evening, 92 + gauss() * 3, 18 + Math.abs(gauss()) * 1.5, 44 + gauss() * 4, 58 + gauss() * 5));
+}
+// nas: a full test every day at 03:00 UTC, on the LAN.
+for (let t = Math.ceil((NOW - 30 * DAY) / DAY) * DAY + 3 * HOUR; t <= NOW; t += DAY)
+  RESULTS.push(ok("s-nas", t, 941 + gauss() * 3, 937 + gauss() * 3, 0.4 + Math.abs(gauss()) * 0.1, 1.8 + Math.abs(gauss()) * 0.4, 2.1 + Math.abs(gauss()) * 0.4));
+// Browser tests at odd daytime moments.
+const DEVICES = [ // [series, tests per week, down, up, idle, busy]
+  ["d-edge", 3, [928, 8], [905, 10], [0.9, 0.2], [4, 1]],
+  ["d-iphone", 5, [420, 90], [380, 70], [4, 2], [25, 6]],
+  ["d-ipad", 2, [260, 50], [210, 40], [6, 2], [31, 7]],
+];
+for (const [series, perWeek, d, u, i, b] of DEVICES)
+  for (let k = 0; k < Math.round((perWeek * 30) / 7); k++) {
+    const day = Math.floor(rnd() * 30), at = NOW - day * DAY - (rnd() * 14 + 1) * HOUR;
+    const idle = Math.max(0.3, i[0] + gauss() * i[1]), busy = Math.max(idle + 1, b[0] + gauss() * b[1]);
+    RESULTS.push(ok(series, at, d[0] + gauss() * d[1], u[0] + gauss() * u[1], idle, busy, busy * 1.2));
+  }
+RESULTS.sort((a, b) => a.at - b.at);
+RESULTS.forEach((r, n) => (r.id = n + 1));
+
+const last = (s) => RESULTS.filter((r) => r.series === s).at(-1);
+const SCHEDULES = [
+  { id: "s-tailmeadow", far_end: "tailmeadow:3966", version: "v0.1.0", test: "light", every: "Every 3 hours", paused: false, last: last("s-tailmeadow"), next_at: last("s-tailmeadow").at + 3 * HOUR },
+  { id: "s-nas", far_end: "nas.lan:3966", version: "v0.1.0", test: "full", every: "Every day at 03:00", paused: false, last: last("s-nas"), next_at: last("s-nas").at + DAY },
+];
+// The one alert rule, and what it sent.
+const ALERT_RULE = { metric: "download", below: { percent_of_plan: 80 }, in_a_row: 3, retest: true, series: "s-tailmeadow" };
+const CHANNELS = [{ kind: "ntfy", url: "https://ntfy.sh/jimmy-dyno-7f3k" }];
+const SETTINGS = { plan_mbps: PLAN_MBPS, keep_days: null /* forever */, digest: "weekly", scheduler_stopped_alert: true };
+const breaches = RESULTS.filter((r) => r.breach);
+const ALERTS = [
+  { at: breaches[2].at, kind: "fired", text: `tailmeadow download below 80% of your 500 Mbit/s plan, 3 tests in a row (latest ${breaches[2].download_mbps} Mbit/s, retested)` },
+  { at: breaches.at(-1).at + 3 * HOUR, kind: "recovered", text: "tailmeadow download back above 400 Mbit/s" },
+  { at: NOW - 4 * DAY - 9 * HOUR, kind: "digest", text: "Weekly digest sent: 54 scheduled tests, 1 failed, download median 437 Mbit/s" },
+];
+
+// A scheduled test that starts while the page is open: one frame every 0.1 s.
+// phase: "warm" (pings so a tailnet path settles), "latency", "download", "upload", "done".
+const LIVE_RUN = [];
+for (let n = 0, t = 0; t <= 14.0001; n++, t = n / 10) {
+  const phase = t < 2 ? "warm" : t < 3 ? "latency" : t < 8 ? "download" : t < 13 ? "upload" : "done";
+  const ramp = (s) => Math.min(1, (t - s) / 1.2);
+  const mbps = phase === "download" ? r1(441 * ramp(3) + gauss() * 6) : phase === "upload" ? r1(92 * ramp(8) + gauss() * 2) : 0;
+  const ms = phase === "download" || phase === "upload" ? r1(45 + gauss() * 5) : r1(18 + Math.abs(gauss()));
+  LIVE_RUN.push({ t: r1(t), phase, mbps: Math.max(0, mbps), ms });
+}
+// ---- end of shared data ----
+
+// ======================== Prototype A: Inside Telemetry ========================
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+// ---------- times (all UTC, so the data reads the same everywhere) ----------
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const p2 = (n) => String(n).padStart(2, "0");
+const dDay = (ms) => { const d = new Date(ms); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; };
+const dTime = (ms) => { const d = new Date(ms); return `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`; };
+const dFull = (ms) => `${dDay(ms)}, ${dTime(ms)} UTC`;
+const ymd = (ms) => new Date(ms).toISOString().slice(0, 10);
+function agoText(ms) {
+  const s = Math.max(0, (NOW - ms) / 1000);
+  if (s < 90) return "just now";
+  const m = s / 60;
+  if (m < 90) return `${Math.round(m)} min ago`;
+  const h = m / 60;
+  if (h < 36) return `${Math.round(h)} h ago`;
+  return `${Math.round(h / 24)} d ago`;
+}
+function inText(ms) {
+  const s = (ms - NOW) / 1000;
+  if (s <= 0) return "due now";
+  if (s < 60) return "in under a minute";
+  const m = s / 60;
+  if (m < 90) return `in ${Math.round(m)} min`;
+  const h = m / 60;
+  if (h < 36) return `in ${Math.round(h)} h`;
+  return `in ${Math.round(h / 24)} d`;
+}
+
+// ---------- settings and number formats ----------
+const S = { plan: SETTINGS.plan_mbps, profile: "standard", streams: "auto", name: "", unit: "Mbps", keepDays: SETTINGS.keep_days, digest: SETTINGS.digest, stopAlert: SETTINGS.scheduler_stopped_alert };
+const unitLbl = () => (S.unit === "MBps" ? "MB/s" : "Mbps");
+const cv = (v) => (S.unit === "MBps" ? v / 8 : v); // Mbit/s to the display unit
+const uv = (v) => (S.unit === "MBps" ? v * 8 : v); // the display unit back to Mbit/s
+function fmt(v) {
+  if (v == null || Number.isNaN(v)) return "–";
+  v = cv(v);
+  return v >= 100 ? Math.round(v).toLocaleString("en-US") : v >= 10 ? v.toFixed(0) : v.toFixed(1);
+}
+const fms = (v) => (v == null || Number.isNaN(v) ? "–" : v < 10 ? v.toFixed(1) : String(Math.round(v)));
+const tickText = (v) => v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+const pct = (v) => `${Math.max(0, Math.min(100, v)).toFixed(2)}%`;
+/** An axis top and step: five-ish intervals of 1, 2, 2.5 or 5 times a power of ten (chart.ts). */
+function nice(max) {
+  if (!(max > 0)) return [1, 0.25];
+  const raw = max / 5, p = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((k) => k * p).find((s) => s >= raw);
+  return [Math.ceil(max / step - 1e-9) * step, step];
+}
+
+// ---------- series: colours are for the line, not the metric ----------
+// The live app colours by metric (download red, upload bezel, latency orange). A history plot has one metric
+// and several lines, so a line's colour says which far end or device it is, and the metric colours stay on
+// the plot titles and the plan line. All pass 3:1 against the panel (#15171C).
+const COLORS = { "s-tailmeadow": "#4CC9F0", "s-nas": "#B79CFF", "d-edge": "#FFD166", "d-iphone": "#FF8FB8", "d-ipad": "#9BE564" };
+const SER = SERIES.map((s) => ({ ...s, color: COLORS[s.id] }));
+const EXTRA_COLORS = ["#7FE0D0", "#FFA94D", "#C0D6FF"];
+const serById = (id) => SER.find((s) => s.id === id) || SER[0];
+const THIS_DEVICE = "d-edge";
+
+// ---------- app state ----------
+const A = { sheet: null, opener: null, note: "", noteTimer: 0 };
+const stage = $("#stage");
+
+// ---------- gauge geometry (dyno-ui.html) ----------
+function P(cx, cy, r, deg) { const a = ((deg - 90) * Math.PI) / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }
+function ARC(cx, cy, r, a0, a1) { const [x0, y0] = P(cx, cy, r, a0), [x1, y1] = P(cx, cy, r, a1); return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; }
+const logMap = (v) => Math.min(1, Math.max(0, Math.log10(Math.max(v || 0, 1)) / 4));
+const linMap = (max) => (v) => Math.min(1, Math.max(0, (v || 0) / max));
+function linTicks(max, minor, major) { const t = []; for (let v = 0; v <= max; v += minor) t.push({ v, k: v % major === 0 ? "major" : "minor", label: v % major === 0 ? String(v) : null }); return t; }
+const angOf = (o, v) => (o.a0 ?? -120) + ((o.a1 ?? 120) - (o.a0 ?? -120)) * o.map(v);
+function gaugeG(o) {
+  const { cx, cy, r, ticks, id } = o, a1 = o.a1 ?? 120, tl = r * 0.17, needle = r * 0.86, hub = o.hub ?? r * 0.085;
+  let s = "";
+  if (o.red != null) s += `<path d="${ARC(cx, cy, r * 0.95, angOf(o, o.red), a1)}" class="g-red" stroke-width="${(r * 0.075).toFixed(1)}"/>`;
+  for (const t of ticks) {
+    const a = angOf(o, t.v), len = t.k === "major" ? tl : t.k === "mid" ? tl * 0.62 : tl * 0.4;
+    const [x0, y0] = P(cx, cy, r * 0.9 - len, a), [x1, y1] = P(cx, cy, r * 0.9, a);
+    s += `<line class="g-tick ${t.k}" x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke-width="${(t.k === "major" ? r * 0.038 : t.k === "mid" ? r * 0.02 : r * 0.012).toFixed(2)}"/>`;
+    if (t.label && o.labels !== false) { const [lx, ly] = P(cx, cy, r * 0.6, a); s += `<text class="g-lab" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="${(r * (o.labelScale ?? 0.13)).toFixed(1)}">${t.label}</text>`; }
+  }
+  if (o.ghost) s += `<g id="${id}-ghost" class="g-ghost" style="transform-origin:${cx}px ${cy}px"><line x1="${cx}" y1="${(cy - r * 0.97).toFixed(1)}" x2="${cx}" y2="${(cy - r * 0.74).toFixed(1)}" stroke-width="${(r * 0.05).toFixed(1)}" stroke-linecap="round"/></g>`;
+  s += `<g id="${id}" class="g-needle" style="transform-origin:${cx}px ${cy}px"><path class="g-ndl" d="M${cx - r * 0.026} ${cy + r * 0.13} L${cx - r * 0.008} ${cy - needle} Q${cx} ${cy - needle - r * 0.03} ${cx + r * 0.008} ${cy - needle} L${cx + r * 0.026} ${cy + r * 0.13}Z"/><circle class="g-hub" cx="${cx}" cy="${cy}" r="${hub.toFixed(1)}" stroke-width="${(r * 0.02).toFixed(1)}"/></g>`;
+  return s;
+}
+function setNeedle(el, o, v, which = o.id) { const n = el.querySelector("#" + which); if (n) n.style.transform = `rotate(${angOf(o, v).toFixed(2)}deg)`; }
+const CL = { id: "cl", cx: 100, cy: 100, r: 88, map: linMap(150), ticks: linTicks(150, 10, 50), red: 100, ghost: true, labelScale: 0.16 };
+const faceSVG = (cx, cy, r) => `<circle cx="${cx}" cy="${cy}" r="${r * 1.065}" fill="var(--bezel)"/><circle cx="${cx}" cy="${cy}" r="${r * 1.025}" fill="var(--black)"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--face)"/>`;
+
+// ---------- the first screen: this browser's latest test, as the live app shows it ----------
+const ME = last(THIS_DEVICE);
+const ME_BUSY = Math.max(ME.loaded_down_ms, ME.loaded_up_ms);
+const FR = 170, FCX = 200, FCY = 200;
+const fAng = (v) => -120 + 240 * logMap(v);
+const TRACK = ARC(FCX, FCY, FR, -120, 120);
+const zonePath = () => ARC(FCX, FCY, FR + 19, fAng(S.plan), 120);
+
+function firstHTML() {
+  const labs = [1, 10, 100, 1000, 10000].map((v, i) => { const [x, y] = P(FCX, FCY, FR - 34, fAng(v)); return `<text class="f-lab" x="${x.toFixed(1)}" y="${y.toFixed(1)}">${["1", "10", "100", "1G", "10G"][i]}</text>`; }).join("");
+  return `<div class="v" id="view">
+  <header class="v-top"><h1 class="v-logo"><span class="v-brand" aria-hidden="true">DYNO<b>/</b></span><span class="sr">dyno speed test</span><span class="v-by">by Redline Labs</span></h1><span class="v-host">This server (dyno.lan:3966)</span></header>
+  <div class="v-main"><div class="fit">
+    <div class="f-dial"><svg viewBox="0 0 400 310" aria-hidden="true">
+      <path class="f-zone" id="f-zone" d="${zonePath()}"/><path class="f-track" d="${TRACK}"/>
+      <path class="f-fill" id="f-fill" d="${TRACK}" pathLength="1" stroke-dasharray="0 1"/>
+      <path class="f-over" id="f-over" d="${TRACK}" pathLength="1" stroke-dasharray="0 1"/>
+      ${labs}
+      <circle class="f-tip" id="f-tip" r="10" cx="0" cy="0"/></svg>
+      <div class="f-center"><span class="f-phase"><span id="f-ph">Download speed</span></span><span class="f-val none" id="f-val">–</span><span class="f-unit" id="f-unit">Mbps</span></div>
+    </div>
+    <div class="read">
+      <button class="rg lat" data-sheet="latency" aria-haspopup="dialog"><span class="rg-h">Latency</span>
+        <span class="rv"><span class="rl">Idle</span><span class="rn"><b id="f-li" class="none">–</b><small>ms</small></span></span>
+        <span class="rv"><span class="rl">Busy</span><span class="rn"><b id="f-lb" class="none">–</b><small>ms</small></span></span></button>
+      <button class="rg up" data-sheet="speed" aria-haspopup="dialog"><span class="rg-h">Upload</span>
+        <span class="rv"><span class="rl"></span><span class="rn"><b id="f-u" class="wide none">–</b><small id="f-uu">Mbps</small></span></span></button>
+    </div>
+    <div class="f-act"><button class="go" id="f-go">Test again</button><button class="tele-link" data-sheet="latency" aria-haspopup="dialog">Telemetry</button></div>
+    <p class="f-msg" id="f-msg"></p>
+  </div></div>
+</div>`;
+}
+
+const TABS = [["latency", "Latency", "Latency"], ["speed", "Speed over time", "Speed"], ["setup", "Setup", "Setup"], ["history", "History", "History"]];
+function sheetHTML() {
+  return `<div class="sheet-wrap" id="sheet" hidden><div class="sheet-back" data-close></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-label="Telemetry"><div class="sheet-grab"></div>
+    <div class="sheet-head"><div class="tabs" role="tablist" aria-label="Telemetry">${TABS.map(([k, long, short]) =>
+      `<button role="tab" id="tab-${k}" aria-controls="sheet-body" data-tab="${k}"><span class="long">${long}</span><span class="short">${short}</span></button>`).join("")}</div><button class="sheet-x" data-close>Close</button></div>
+    <div id="sheet-body" role="tabpanel" tabindex="0"></div></section></div>
+  <p class="sr" id="live" aria-live="polite"></p>`;
+}
+stage.innerHTML = firstHTML() + sheetHTML();
+const view = $("#view");
+const sheetEl = $(".sheet");
+const announce = (m) => { $("#live").textContent = m; };
+
+/** Writes a live number with each digit in a fixed-width box (.tn), so it doesn't wobble as it changes (ADR-0011). */
+function setNum(el, text) {
+  if (el.getAttribute("data-v") === text) return;
+  el.setAttribute("data-v", text);
+  el.innerHTML = `<span aria-hidden="true">${text.replace(/\d/g, '<span class="tn">$&</span>')}</span><span class="sr">${text === "–" ? "none yet" : text}</span>`;
+  el.classList.toggle("none", text === "–");
+}
+function renderFirst() {
+  const f = logMap(ME.download_mbps), fp = logMap(S.plan);
+  $("#f-zone").setAttribute("d", zonePath());
+  $("#f-fill").setAttribute("stroke-dasharray", `${Math.min(f, fp).toFixed(4)} 1`);
+  $("#f-over").setAttribute("stroke-dasharray", f > fp ? `0 ${fp.toFixed(4)} ${(f - fp).toFixed(4)} 1` : "0 1");
+  const [tx, ty] = P(FCX, FCY, FR, -120 + 240 * f);
+  $("#f-tip").setAttribute("cx", tx.toFixed(1));
+  $("#f-tip").setAttribute("cy", ty.toFixed(1));
+  const val = $("#f-val");
+  setNum(val, fmt(ME.download_mbps));
+  val.classList.toggle("long", (val.getAttribute("data-v") || "").length > 3);
+  $("#f-unit").textContent = unitLbl();
+  $("#f-uu").textContent = unitLbl();
+  setNum($("#f-li"), fms(ME.idle_ms));
+  setNum($("#f-lb"), fms(ME_BUSY));
+  setNum($("#f-u"), fmt(ME.upload_mbps));
+}
+
+/** Scales the first screen to the largest size that fits (ADR-0016), as main.ts does. */
+const fitEl = $(".fit"), mainEl = $(".v-main");
+function fit() {
+  const { width: W, height: H } = mainEl.getBoundingClientRect();
+  const scale = (row) => {
+    fitEl.classList.toggle("row", row);
+    const fits = (p) => {
+      fitEl.style.setProperty("--p", `${p}px`);
+      const w = Math.max(...[fitEl, ...fitEl.children].map((e) => e.getBoundingClientRect().width));
+      return w <= W && fitEl.getBoundingClientRect().height <= H;
+    };
+    let [lo, hi] = [0.2, Math.max(0.2, W / 540)];
+    for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2; if (fits(mid)) lo = mid; else hi = mid; }
+    return lo;
+  };
+  const col = scale(false);
+  const row = W > H * 1.5 ? scale(true) : 0;
+  const useRow = row > col * 1.1;
+  fitEl.classList.toggle("row", useRow);
+  fitEl.style.setProperty("--p", `${useRow ? row : col}px`);
+}
+new ResizeObserver(fit).observe(mainEl);
+document.fonts?.ready.then(fit);
+document.fonts?.addEventListener?.("loadingdone", () => { fit(); if (typeof sizeStage === "function") sizeStage(); }); // the web fonts arrive after the first fit
+
+// ---------- the message line under the buttons (two lines of space, ADR-0016) ----------
+function setNote(text, ms = 7000) {
+  A.note = text;
+  clearTimeout(A.noteTimer);
+  if (text) A.noteTimer = setTimeout(() => { A.note = ""; renderMsg(); }, ms);
+  renderMsg();
+}
+$("#f-go").onclick = () => setNote("This prototype doesn't run a test. The screen is a copy of the live first screen.");
+
+// ---------- the telemetry dialog ----------
+function openSheet(tab, opener) {
+  if (!A.sheet && opener) A.opener = opener;
+  A.sheet = tab;
+  drawSheet();
+  $(`#tab-${tab}`).focus({ preventScroll: true });
+}
+function closeSheet() {
+  A.sheet = null;
+  drawSheet();
+  sheetEl.style.translate = sheetEl.style.transition = $(".sheet-back").style.opacity = "";
+  A.opener?.focus({ preventScroll: true });
+  A.opener = null;
+}
+function drawSheet() {
+  const w = $("#sheet");
+  w.hidden = !A.sheet;
+  view.inert = !!A.sheet;
+  if (!A.sheet) return;
+  $$("[data-tab]", w).forEach((b) => { b.setAttribute("aria-selected", String(b.dataset.tab === A.sheet)); b.tabIndex = b.dataset.tab === A.sheet ? 0 : -1; });
+  const b = $("#sheet-body");
+  b.setAttribute("aria-labelledby", `tab-${A.sheet}`);
+  b.scrollTop = 0;
+  sheetEl.scrollTop = 0;
+  if (A.sheet === "latency") drawLatency(b);
+  else if (A.sheet === "speed") drawSpeed(b);
+  else if (A.sheet === "setup") drawSetup(b);
+  else drawHistory(b);
+}
+
+// Phones: drag the sheet down from its top to dismiss it (the grab handle's promise). Close and Escape do the same without dragging.
+const isDialog = () => stage.clientWidth >= 700;
+let drag = null;
+sheetEl.addEventListener("touchstart", (e) => {
+  const t = e.touches[0];
+  drag = e.touches.length === 1 && !isDialog() ? { x: t.clientX, y: t.clientY, dy: 0, at: e.timeStamp, v: 0, on: null, tabs: !!e.target.closest(".tabs") } : null;
+}, { passive: true });
+sheetEl.addEventListener("touchmove", (e) => {
+  if (!drag) return;
+  const t = e.touches[0], dx = t.clientX - drag.x, dy = t.clientY - drag.y;
+  if (drag.on === null) {
+    if (drag.tabs ? Math.hypot(dx, dy) < 6 : !dx && !dy) return;
+    drag.on = dy > 0 && dy >= Math.abs(dx) && sheetEl.scrollTop <= 0 && !e.target.closest(".ch-plot");
+    if (!drag.on) { drag = null; return; }
+  }
+  e.preventDefault();
+  const d = Math.max(0, dy);
+  drag.v = (d - drag.dy) / Math.max(1, e.timeStamp - drag.at);
+  drag.dy = d; drag.at = e.timeStamp;
+  sheetEl.style.transition = "none";
+  sheetEl.style.translate = `0 ${d}px`;
+  $(".sheet-back").style.opacity = String(1 - Math.min(1, d / sheetEl.offsetHeight));
+}, { passive: false });
+const dragEnd = () => {
+  if (!drag?.on) { drag = null; return; }
+  const { dy, v } = drag;
+  drag = null;
+  const away = dy > Math.min(140, sheetEl.offsetHeight / 4) || (dy > 40 && v > 0.5);
+  sheetEl.style.transition = "translate 180ms ease-out";
+  sheetEl.style.translate = away ? "0 100%" : "";
+  $(".sheet-back").style.opacity = away ? "0" : "";
+  if (away) setTimeout(closeSheet, 180); else setTimeout(() => (sheetEl.style.transition = ""), 200);
+};
+sheetEl.addEventListener("touchend", dragEnd);
+sheetEl.addEventListener("touchcancel", dragEnd);
+
+stage.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-sheet],[data-close],[data-tab],[data-go]");
+  if (!t) return;
+  if (t.dataset.sheet) openSheet(t.dataset.sheet, t);
+  else if (t.dataset.tab) openSheet(t.dataset.tab);
+  else if (t.dataset.go) openSheet(t.dataset.go, t);
+  else closeSheet();
+});
+stage.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (!t.dataset?.tab) return;
+  const keys = TABS.map(([k]) => k), i = keys.indexOf(t.dataset.tab);
+  const n = e.key === "ArrowRight" ? (i + 1) % keys.length : e.key === "ArrowLeft" ? (i - 1 + keys.length) % keys.length : e.key === "Home" ? 0 : e.key === "End" ? keys.length - 1 : -1;
+  if (n < 0) return;
+  e.preventDefault();
+  openSheet(keys[n]);
+});
+
+// ---------- Latency tab: Cluster's gauge, unchanged ----------
+const GRADE_TEXT = {
+  "A+": "No slowdown when the line is busy. Calls and games stay smooth during big downloads.",
+  A: "Barely any slowdown when the line is busy. Calls and games stay smooth.",
+  B: "Some slowdown when the line is busy. A video call may stutter while someone uploads a big file.",
+  C: "Noticeable lag when the line is busy. Turning on smart queue management (SQM) in your router usually fixes this.",
+  D: "Heavy lag when the line is busy. Turn on smart queue management (SQM) in your router.",
+  F: "Severe lag when the line is busy. Calls and games will suffer. Turn on SQM in your router.",
+};
+function drawLatency(b) {
+  const rpm = Math.round(60000 / ME_BUSY);
+  b.innerHTML = `<div class="latgrid">
+    <div class="lg"><svg viewBox="-6 -6 212 212" role="img" aria-label="Latency gauge. The needle is latency now; the orange marker is the highest latency while the line was busy.">${faceSVG(100, 100, 88)}${gaugeG(CL)}</svg>
+      <span class="lg-read"><span id="lg-v" class="lg-n none">–</span><small>ms</small></span><span class="lg-busy">${fms(ME_BUSY)} ms when busy</span></div>
+    <div class="latside"><div class="gradebox"><span class="grade">${ME.grade}</span><p><b>Bufferbloat grade</b>${GRADE_TEXT[ME.grade]}</p></div>
+      <dl class="kv"><dt>Idle latency</dt><dd>${fms(ME.idle_ms)} ms</dd><dt>While downloading</dt><dd>${fms(ME.loaded_down_ms)} ms</dd>
+        <dt>While uploading</dt><dd>${fms(ME.loaded_up_ms)} ms</dd><dt>Jitter</dt><dd>${fms(ME.jitter_ms)} ms</dd>
+        <dt>Responsiveness</dt><dd>${rpm.toLocaleString("en-US")} RPM</dd><dt>Server</dt><dd>dyno.lan:3966</dd></dl></div></div>`;
+  setNeedle(b, CL, ME.idle_ms);
+  setNeedle(b, CL, ME_BUSY, "cl-ghost");
+  setNum($("#lg-v", b), fms(ME.idle_ms));
+}
+
+// ---------- Speed over time tab: this browser's latest test, unchanged in spirit ----------
+function drawSpeed(b) {
+  const g = mulberry32(77), T = 22.4;
+  const dl = [], ul = [], lat = [];
+  for (let t = 0.1; t <= T; t = Math.round((t + 0.1) * 10) / 10) {
+    if (t > 1.3 && t <= 11.3) dl.push([t, ME.download_mbps * (1 - Math.exp(-(t - 1.3) / 0.6)) * (1 + (g() - 0.5) * 0.03)]);
+    if (t > 11.7 && t <= 21.7) ul.push([t, ME.upload_mbps * (1 - Math.exp(-(t - 11.7) / 0.7)) * (1 + (g() - 0.5) * 0.03)]);
+  }
+  for (let t = 0.2; t <= T; t = Math.round((t + 0.2) * 10) / 10) {
+    const busy = t > 1.3 && t <= 11.3 ? ME.loaded_down_ms : t > 11.7 && t <= 21.7 ? ME.loaded_up_ms : ME.idle_ms;
+    const k = t > 1.3 && t <= 11.3 ? 1 - Math.exp(-(t - 1.3) / 0.8) : t > 11.7 && t <= 21.7 ? 1 - Math.exp(-(t - 11.7) / 0.8) : 0;
+    lat.push([t, ME.idle_ms + (busy - ME.idle_ms) * k * (0.85 + g() * 0.3)]);
+  }
+  const vMax = Math.max(S.plan, ...dl.map((p) => p[1]), ...ul.map((p) => p[1]));
+  const [vTop, vStep] = nice(cv(vMax)), msMax = Math.max(4, ...lat.map((p) => p[1])), [mTop, mStep] = nice(msMax);
+  const X = (t) => (t / T) * 1000, Yv = (v) => 100 - (cv(v) / vTop) * 100, Ym = (v) => 100 - (v / mTop) * 100;
+  const line = (pts, Y) => pts.map(([t, v], i) => `${i ? "L" : "M"}${X(t).toFixed(1)} ${Y(v).toFixed(2)}`).join("");
+  const area = (pts, Y) => `${line(pts, Y)}L${X(pts.at(-1)[0]).toFixed(1)} 100L${X(pts[0][0]).toFixed(1)} 100Z`;
+  const grid = (top, step) => { let s = ""; for (let t = 0; t <= T; t += 5) s += `<line class="ch-g" x1="${X(t)}" x2="${X(t)}" y1="0" y2="100"/>`; for (let i = 0; i * step <= top + 1e-9; i++) { const y = (100 - ((i * step) / top) * 100).toFixed(2); s += `<line class="ch-g${i ? "" : " ch-base"}" x1="0" x2="1000" y1="${y}" y2="${y}"/>`; } return s; };
+  const ylab = (top, step) => { let s = ""; for (let i = 0; i * step <= top + 1e-9; i++) s += `<span class="ch-y" style="bottom:${pct(((i * step) / top) * 100)}">${tickText(i * step)}</span>`; return s; };
+  const xlab = [0, 5, 10, 15, 20].map((t) => `<span class="ch-xt${t === 0 ? " first" : ""}" style="left:${pct((t / T) * 100)}">${t} s</span>`).join("");
+  const warm = (a, c) => `<rect class="ch-warm" x="${X(a)}" width="${X(c) - X(a)}" y="0" height="100"/>`;
+  const grad = (id) => `<linearGradient id="${id}" class="ch-a-def ${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="100"><stop offset="0"/><stop offset="1"/></linearGradient>`;
+  const peak = (a) => Math.max(...a.map((p) => p[1]));
+  b.innerHTML = `<div class="pnlx"><div style="display:grid;gap:30px">
+    <div><div class="ch-head"><h2>Throughput</h2><span>${unitLbl()}</span></div>
+      <div class="ch-plot" style="--ph:170px;cursor:default" aria-hidden="true"><svg viewBox="0 0 1000 100" preserveAspectRatio="none"><defs>${grad("ch-gd")}${grad("ch-gu")}</defs>${grid(vTop, vStep)}${warm(1.3, 2.8)}${warm(11.7, 14.2)}
+        <path class="ch-a down" d="${area(dl, Yv)}"/><path class="ch-l down" d="${line(dl, Yv)}"/><path class="ch-a up" d="${area(ul, Yv)}"/><path class="ch-l up" d="${line(ul, Yv)}"/></svg>${ylab(vTop, vStep)}</div>
+      <div class="ch-xa" aria-hidden="true">${xlab}</div>
+      <table class="ch-lg named"><thead><tr><td></td><th scope="col">Result</th><th scope="col">Peak</th></tr></thead><tbody>
+        <tr><th scope="row"><i class="ch-k down"></i>Download</th><td>${fmt(ME.download_mbps)}</td><td>${fmt(peak(dl))}</td></tr>
+        <tr><th scope="row"><i class="ch-k up"></i>Upload</th><td>${fmt(ME.upload_mbps)}</td><td>${fmt(peak(ul))}</td></tr></tbody></table></div>
+    <div><div class="ch-head"><h2>Latency</h2><span>ms</span></div>
+      <div class="ch-plot" style="--ph:100px;cursor:default" aria-hidden="true"><svg viewBox="0 0 1000 100" preserveAspectRatio="none"><defs>${grad("ch-gl")}</defs>${grid(mTop, mStep)}${warm(1.3, 2.8)}${warm(11.7, 14.2)}
+        <path class="ch-a lat" d="${area(lat, Ym)}"/><path class="ch-l lat" d="${line(lat, Ym)}"/></svg>${ylab(mTop, mStep)}</div>
+      <div class="ch-xa" aria-hidden="true">${xlab}</div>
+      <table class="ch-lg named"><thead><tr><td></td><th scope="col">Idle</th><th scope="col">Downloading</th><th scope="col">Uploading</th><th scope="col">Peak</th></tr></thead><tbody>
+        <tr><th scope="row"><i class="ch-k lat"></i>Latency</th><td>${fms(ME.idle_ms)}</td><td>${fms(ME.loaded_down_ms)}</td><td>${fms(ME.loaded_up_ms)}</td><td>${fms(peak(lat))}</td></tr></tbody></table></div></div>
+    <p class="note">The shaded start of each transfer is warm-up. Neither the result nor the peak counts it.</p></div>`;
+}
+
+// ---------- the model History and Setup share: schedules, results, lines ----------
+const FREQS = [["15m", "Every 15 minutes", 15 * 60e3], ["30m", "Every 30 minutes", 30 * 60e3], ["1h", "Every hour", HOUR], ["3h", "Every 3 hours", 3 * HOUR], ["6h", "Every 6 hours", 6 * HOUR], ["12h", "Every 12 hours", 12 * HOUR], ["day", "Every day at", DAY]];
+function parseEvery(text) {
+  const day = /^Every day at (\d\d:\d\d)$/.exec(text);
+  if (day) return { freq: "day", at: day[1] };
+  const m = /^Every (\d+) (minutes|hours)$/.exec(text);
+  return { freq: m ? `${m[1]}${m[2][0]}` : "1h", at: "03:00" };
+}
+const SCH = SCHEDULES.map((s) => ({ ...s, ...parseEvery(s.every) }));
+const freqMs = (s) => FREQS.find((f) => f[0] === s.freq)?.[2] ?? 3 * HOUR;
+const everyText = (s) => (s.freq === "day" ? `Every day at ${s.at}` : FREQS.find((f) => f[0] === s.freq)[1]);
+const intervalOf = (id) => { const s = SCH.find((x) => x.id === id); return s ? freqMs(s) : 3 * HOUR; };
+const EXTRA_RES = []; // results made while the page is open (the live scheduled test)
+const allRes = () => (EXTRA_RES.length ? RESULTS.concat(EXTRA_RES) : RESULTS);
+
+// ---------- History ----------
+const H = { range: "30d", from: ymd(NOW - 10 * DAY), to: ymd(NOW), err: "", show: new Set(["s-tailmeadow", "s-nas"]), hover: null, rows: 15, flagged: false, V: null, scale: {} };
+const METRICS = [
+  { k: "down", name: "Download", rule: "var(--c-down)", speed: true, val: (r) => r.download_mbps, tail: "p10", q: 0.1 },
+  { k: "up", name: "Upload", rule: "var(--c-up)", speed: true, val: (r) => r.upload_mbps, tail: "p10", q: 0.1 },
+  { k: "lat", name: "Latency", rule: "var(--c-lat)", speed: false, val: (r) => r.idle_ms, tail: "p90", q: 0.9 },
+];
+const RANGES = [["24h", "24 hours", "24 h"], ["7d", "7 days", "7 d"], ["30d", "30 days", "30 d"], ["custom", "Custom", "Custom"]];
+const ICON = {
+  fail: `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.6 2.6l6.8 6.8M9.4 2.6L2.6 9.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  path: `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.6L10.4 6 6 10.4 1.6 6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
+  fired: `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.8L11 10.2H1z" fill="currentColor"/></svg>`,
+  rec: `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.4l2.5 2.5 5-5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+};
+const flagged = (r) => !r.ok || r.path_changed || r.breach;
+const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+/** Value at quantile q (0..1) by nearest rank, as web/src/stats.ts does. */
+function quantile(a, q) { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.max(0, Math.ceil(q * s.length) - 1))]; }
+
+function bounds() {
+  if (H.range === "24h") return [NOW - DAY, NOW];
+  if (H.range === "7d") return [NOW - 7 * DAY, NOW];
+  if (H.range === "30d") return [NOW - 30 * DAY, NOW];
+  return [Date.parse(`${H.from}T00:00:00Z`), Math.min(NOW, Date.parse(`${H.to}T00:00:00Z`) + DAY - 1)];
+}
+/** Everything the charts and the table draw from: results in range for the lines that are on, plus the alert moments. */
+function build() {
+  const [t0, t1] = bounds();
+  const rows = allRes().filter((r) => H.show.has(r.series) && r.at >= t0 && r.at <= t1);
+  const marks = rows.map((r) => ({ key: `r${r.id}`, kind: "run", r, at: r.at }));
+  if (H.show.has(ALERT_RULE.series)) ALERTS.forEach((a, i) => { if (a.kind !== "digest" && a.at >= t0 && a.at <= t1) marks.push({ key: `a${i}`, kind: "alert", a, at: a.at }); });
+  marks.sort((x, y) => x.at - y.at);
+  // Failed runs that follow each other on one line are a streak: "1 of 3 in a row".
+  for (const s of SER) {
+    let grp = [];
+    const flush = () => { grp.forEach((m, i) => { m.streak = { i: i + 1, n: grp.length }; m.grp = grp; }); grp = []; };
+    for (const m of marks) {
+      if (m.kind !== "run" || m.r.series !== s.id) continue;
+      if (m.r.ok) flush();
+      else { if (grp.length && m.at - grp.at(-1).at > intervalOf(s.id) * 1.5) flush(); grp.push(m); }
+    }
+    flush();
+  }
+  return { t0, t1, rows, marks };
+}
+
+const TICK_STEPS = [1, 2, 3, 4, 6, 12, 24, 48, 72, 120, 168, 240, 336].map((h) => h * HOUR);
+function xTicks(t0, t1, max) {
+  const step = TICK_STEPS.find((s) => (t1 - t0) / s <= max) || TICK_STEPS.at(-1);
+  const ticks = [];
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) ticks.push(t);
+  return { step, ticks };
+}
+const tickLabel = (t, step) => (step >= DAY || t % DAY === 0 ? dDay(t) : dTime(t));
+
+/** Min, average, the slow-end percentile and max for each line that is on. Failed runs and path changes aren't in them. */
+function statsHTML(v, m) {
+  const f = m.speed ? fmt : fms;
+  let rows = "";
+  for (const s of SER) {
+    if (!H.show.has(s.id)) continue;
+    const mine = v.rows.filter((r) => r.series === s.id), good = mine.filter((r) => r.ok && !r.path_changed).map((r) => m.val(r));
+    let sub = "";
+    if (m.k === "down") {
+      const failed = mine.filter((r) => !r.ok).length, path = mine.filter((r) => r.ok && r.path_changed).length;
+      sub = `<small>${good.length} test${good.length === 1 ? "" : "s"}${failed ? `, ${failed} failed` : ""}${path ? `, ${path} path change${path === 1 ? "" : "s"}` : ""}</small>`;
+    }
+    const name = `<i class="sw sm" style="--c:${s.color}"></i><bdi>${esc(s.name)}</bdi>${sub}`;
+    rows += good.length
+      ? `<tr><th scope="row">${name}</th><td>${f(Math.min(...good))}</td><td>${f(mean(good))}</td><td>${f(quantile(good, m.q))}</td><td>${f(Math.max(...good))}</td></tr>`
+      : `<tr><th scope="row">${name}</th><td class="none" colspan="4">No tests in this range</td></tr>`;
+  }
+  return `<table class="ch-lg named st"><caption class="sr">${m.name} over this range, in ${m.speed ? unitLbl() : "milliseconds"}</caption><thead><tr><td></td><th scope="col">Min</th><th scope="col">Avg</th><th scope="col">${m.tail}</th><th scope="col">Max</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+/** One plot: the SVG is stretched to its box (paths and gridlines only); points, bands and labels are HTML laid over it in percent. */
+function panelHTML(v, m, ticks, X, xlab) {
+  const conv = m.speed ? cv : (x) => x;
+  let vmax = 0;
+  for (const r of v.rows) if (r.ok) vmax = Math.max(vmax, m.val(r));
+  if (m.k === "down") vmax = Math.max(vmax, S.plan);
+  const [top, stp] = nice(conv(vmax) * 1.03);
+  H.scale[m.k] = { top, conv };
+  const Y = (val) => 100 - (conv(val) / top) * 100, xs = (t) => (X(t) * 10).toFixed(1), span = v.t1 - v.t0;
+  let svg = "", under = "", over = "", ylab = "";
+  for (const t of ticks) svg += `<line class="ch-g" x1="${xs(t)}" x2="${xs(t)}" y1="0" y2="100"/>`;
+  for (let i = 0; i * stp <= top + 1e-9; i++) {
+    const y = (100 - ((i * stp) / top) * 100).toFixed(2);
+    svg += `<line class="ch-g${i ? "" : " ch-base"}" x1="0" x2="1000" y1="${y}" y2="${y}"/>`;
+    ylab += `<span class="ch-y" style="bottom:${pct(((i * stp) / top) * 100)}">${tickText(i * stp)}</span>`;
+  }
+  // A failed run is a hatched band as wide as the schedule's interval, under the lines, so the gap in a line has a reason.
+  for (const mk of v.marks) if (mk.kind === "run" && !mk.r.ok) under += `<i class="band" style="left:${X(mk.at).toFixed(2)}%;width:${((intervalOf(mk.r.series) / span) * 100).toFixed(2)}%"></i>`;
+  if (m.k === "down") {
+    svg += `<line class="ch-ref down" x1="0" x2="1000" y1="${Y(S.plan).toFixed(2)}" y2="${Y(S.plan).toFixed(2)}"/>`;
+    over += `<span class="ch-rl end" style="left:100%;bottom:${pct(100 - Y(S.plan))}">Plan ${fmt(S.plan)} ${unitLbl()}</span>`;
+  }
+  for (const s of SER) {
+    if (!H.show.has(s.id)) continue;
+    const rs = v.rows.filter((r) => r.series === s.id), segs = [];
+    let cur = [];
+    // The line breaks at a failed run. A path change is skipped over: it is drawn as its own diamond and isn't part of the line.
+    for (const r of rs) { if (!r.ok) { if (cur.length) segs.push(cur); cur = []; } else if (!r.path_changed) cur.push(r); }
+    if (cur.length) segs.push(cur);
+    const d = segs.map((sg) => sg.map((r, i) => `${i ? "L" : "M"}${xs(r.at)} ${Y(m.val(r)).toFixed(2)}`).join("")).join("");
+    if (d) svg += `<path class="ln${s.kind === "device" ? " dev" : ""}" style="--c:${s.color}" d="${d}"/>`;
+    const good = rs.filter((r) => r.ok && !r.path_changed);
+    if (good.length <= 64) for (const r of good) over += `<i class="mk" style="--c:${s.color};left:${X(r.at).toFixed(2)}%;top:${Y(m.val(r)).toFixed(2)}%"></i>`;
+    for (const r of rs) if (r.ok && r.path_changed) over += `<i class="mk path" style="left:${X(r.at).toFixed(2)}%;top:${Y(m.val(r)).toFixed(2)}%"></i>`;
+  }
+  for (const mk of v.marks) if (mk.kind === "alert") over += `<i class="al ${mk.a.kind === "fired" ? "fired" : "rec"}" style="left:${X(mk.at).toFixed(2)}%"></i>`;
+  return `<section class="cp" role="group" aria-label="${m.name}">
+    <div class="cp-head"><h2 style="--rule:${m.rule}">${m.name}</h2><span>${m.speed ? unitLbl() : "ms, idle latency"}</span></div>
+    <div class="cp-body"><div class="cp-plot"><div class="ch-plot" data-plot="${m.k}" aria-hidden="true">${under}<svg viewBox="0 0 1000 100" preserveAspectRatio="none">${svg}</svg>${ylab}${over}<div class="ch-ov" data-plot="${m.k}"></div></div>
+      <div class="ch-xa" aria-hidden="true">${xlab}</div></div>
+    <div class="cp-stats">${statsHTML(v, m)}</div></div></section>`;
+}
+
+/** The events lane above the plots: failed runs, path changes, and when the alert fired and recovered. */
+function laneHTML(v, X) {
+  const items = [], ticks = [];
+  let nf = 0, np = 0;
+  const glyph = (cls, key, at, inner) => items.push(`<span class="ev ${cls}" data-key="${key}" data-x="${X(at).toFixed(3)}" style="left:${X(at).toFixed(2)}%">${inner}</span>`);
+  const tick = (at, color) => ticks.push(`<i class="ev-tick" style="left:${X(at).toFixed(2)}%;color:${color}"></i>`);
+  for (const mk of v.marks) {
+    if (mk.kind !== "run") continue;
+    if (!mk.r.ok) {
+      nf++;
+      tick(mk.at, "var(--bad)");
+      if (mk.streak.i === 1) { const g = mk.grp; glyph(`ev-fail${g.length > 1 ? " multi" : ""}`, mk.key, (g[0].at + g.at(-1).at) / 2, `${ICON.fail}${g.length > 1 ? `<b>${g.length}</b>` : ""}`); }
+    } else if (mk.r.path_changed) { np++; tick(mk.at, "var(--bone)"); glyph("ev-path", mk.key, mk.at, ICON.path); }
+  }
+  const f = v.marks.find((m) => m.kind === "alert" && m.a.kind === "fired"), c = v.marks.find((m) => m.kind === "alert" && m.a.kind === "recovered");
+  if (f) { tick(f.at, "var(--orange)"); glyph("ev-fired", f.key, f.at, ICON.fired); }
+  if (c) { tick(c.at, "var(--good)"); glyph("ev-rec", c.key, c.at, ICON.rec); }
+  // The alert's duration, drawn at the true times. Glyphs that would collide are spread out by placeLane(); the ticks keep the true times.
+  const bar = f && c ? `<i class="ev-bar" style="left:${X(f.at).toFixed(2)}%;width:${(X(c.at) - X(f.at)).toFixed(2)}%"></i>` : "";
+  const rows = [
+    nf && `<li><span class="kg fail">${ICON.fail}</span><span><b>${nf}</b> failed run${nf === 1 ? "" : "s"}</span></li>`,
+    np && `<li><span class="kg path">${ICON.path}</span><span><b>${np}</b> path change${np === 1 ? "" : "s"}, not counted as slow</span></li>`,
+    (f || c) && `<li><span class="kg fired">${ICON.fired}</span><span class="kg rec">${ICON.rec}</span><span>Alert ${f && c ? "fired, then recovered" : f ? "fired" : "recovered"}</span></li>`,
+  ].filter(Boolean);
+  return `<section class="cp cp-ev" role="group" aria-label="Events">
+    <div class="cp-head"><h2>Events</h2></div>
+    <div class="cp-body"><div class="cp-plot"><div class="ev-lane" aria-hidden="true">${bar}${ticks.join("")}${items.join("")}</div>
+      <p class="note">Hover or tap a mark to read what happened. With the charts focused, the arrow keys step through every test.</p></div>
+    <div class="cp-stats">${rows.length ? `<ul class="key">${rows.join("")}</ul>` : `<p class="note">Nothing to mark in this range.</p>`}</div></div></section>`;
+}
+/** Spreads the lane's glyphs so none covers another, keeping each as near its true time as it can. */
+function placeLane() {
+  const lane = $(".ev-lane");
+  if (!lane) return;
+  const W = lane.clientWidth, gap = 3;
+  const els = $$(".ev", lane).map((el) => ({ el, x: (parseFloat(el.dataset.x) / 100) * W, w: el.offsetWidth, p: 0 })).sort((a, b) => a.x - b.x);
+  els.forEach((o, i) => { o.p = i ? Math.max(o.x, els[i - 1].p + (els[i - 1].w + o.w) / 2 + gap) : o.x; });
+  for (let i = els.length - 1; i >= 0; i--) {
+    const lim = i === els.length - 1 ? W - els[i].w / 2 + 8 : els[i + 1].p - (els[i + 1].w + els[i].w) / 2 - gap;
+    els[i].p = Math.min(els[i].p, lim);
+  }
+  els.forEach((o) => { o.el.style.left = `${o.p.toFixed(1)}px`; });
+}
+
+function chartsHTML(v) {
+  const cw = $("#hist").clientWidth, pw = (cw >= 760 ? cw - 314 : cw) - 46;
+  const { step, ticks } = xTicks(v.t0, v.t1, Math.max(3, Math.floor(pw / 62)));
+  const span = v.t1 - v.t0, X = (t) => ((t - v.t0) / span) * 100;
+  const xlab = ticks.map((t) => { const p = X(t), edge = p < 3 ? " first" : p > 97 ? " last" : ""; return `<span class="ch-xt${edge}" style="left:${pct(p)}">${tickLabel(t, step)}</span>`; }).join("");
+  H.scale = {};
+  return laneHTML(v, X) + METRICS.map((m) => panelHTML(v, m, ticks, X, xlab)).join("");
+}
+
+// ----- what a moment says: the tooltip and the slider's spoken value -----
+function tipHTML(mk) {
+  if (mk.kind === "alert") {
+    const a = mk.a, fired = a.kind === "fired";
+    return `<p class="tt"><span class="tg ${fired ? "fired" : "rec"}">${fired ? ICON.fired : ICON.rec}</span><b>${fired ? "Alert fired" : "Alert recovered"}</b><span>${dFull(a.at)}</span></p><p class="tx">${esc(a.text)}</p>`;
+  }
+  const r = mk.r, s = serById(r.series);
+  const head = `<p class="tt"><i class="sw sm" style="--c:${s.color}"></i><b>${esc(s.name)}</b><span>${dFull(r.at)}</span></p>`;
+  if (!r.ok) return `${head}<p class="tx bad"><b>Failed${mk.streak.n > 1 ? `, ${mk.streak.i} of ${mk.streak.n} in a row` : ""}.</b> ${esc(r.error)}</p>`;
+  const li = (cls, val, rest) => `<li><i class="ch-k ${cls}"></i><b>${val}</b> ${rest}</li>`;
+  let out = `${head}<ul>${li("down", fmt(r.download_mbps), `${unitLbl()} down`)}${li("up", fmt(r.upload_mbps), `${unitLbl()} up`)}${li("lat", fms(r.idle_ms), `ms idle, ${fms(Math.max(r.loaded_down_ms, r.loaded_up_ms))} ms busy`)}</ul>`;
+  if (r.path_changed) out += `<p class="tx"><b>Path changed.</b> ${esc(r.note)}</p>`;
+  else if (r.breach) out += `<p class="tx slow"><b>Slow.</b> Below the alert level. dyno retested once and it was still slow.</p>`;
+  return out;
+}
+function markText(mk) {
+  if (mk.kind === "alert") return `${mk.a.kind === "fired" ? "Alert fired" : "Alert recovered"}, ${dFull(mk.a.at)}. ${mk.a.text}`;
+  const r = mk.r, s = serById(r.series);
+  if (!r.ok) return `${s.name}, ${dFull(r.at)}: failed${mk.streak.n > 1 ? `, ${mk.streak.i} of ${mk.streak.n} in a row` : ""}. ${r.error}`;
+  return `${s.name}, ${dFull(r.at)}: download ${fmt(r.download_mbps)} ${unitLbl()}, upload ${fmt(r.upload_mbps)} ${unitLbl()}, latency ${fms(r.idle_ms)} milliseconds${r.path_changed ? ". Path changed, not counted as slow" : r.breach ? ". Slow: below the alert level" : ""}`;
+}
+
+/** The crosshair in all three plots, a dot on the moment, and one tooltip in the plot that was pointed at. */
+function drawOverlay() {
+  const root = $("#h-charts");
+  if (!root || !H.V) return;
+  const v = H.V, mk = H.hover ? v.marks.find((m) => m.key === H.hover.key) : null, span = v.t1 - v.t0;
+  if (H.hover && !mk) H.hover = null;
+  for (const ov of $$(".ch-ov", root)) {
+    if (!mk) { ov.innerHTML = ""; continue; }
+    const plot = ov.dataset.plot, x = ((mk.at - v.t0) / span) * 100, m = METRICS.find((q) => q.k === plot), sc = H.scale[plot];
+    let html = `<i class="ch-cross" style="left:${x.toFixed(2)}%"></i>`;
+    if (mk.kind === "run" && mk.r.ok && sc) html += `<i class="ch-dot" style="--c:${serById(mk.r.series).color};left:${x.toFixed(2)}%;top:${(100 - (sc.conv(m.val(mk.r)) / sc.top) * 100).toFixed(2)}%"></i>`;
+    if (H.hover.plot === plot) html += `<div class="ch-tip" style="left:0">${tipHTML(mk)}</div>`;
+    ov.innerHTML = html;
+    const tip = $(".ch-tip", ov);
+    if (tip) {
+      const W = ov.clientWidth, w = tip.offsetWidth, px = (x / 100) * W;
+      let left = px + 14;
+      if (left + w > W + 4) left = px - 14 - w;
+      tip.style.left = `${Math.max(-34, Math.min(left, W - w + 4))}px`;
+    }
+  }
+  const key = $("#h-key");
+  if (key) {
+    key.setAttribute("aria-valuenow", String(Math.max(0, mk ? v.marks.indexOf(mk) : 0)));
+    key.setAttribute("aria-valuetext", mk ? markText(mk) : "No test chosen. Use the arrow keys to read one.");
+  }
+}
+function setHover(key, plot = "down") {
+  if (key && H.hover && H.hover.key === key && H.hover.plot === plot) return;
+  H.hover = key ? { key, plot } : null;
+  drawOverlay();
+}
+/** The test nearest the pointer by pixels; a failed run reaches 5 px further, so its band is easy to land on. */
+function nearestRun(v, frac, width) {
+  let best = null, bd = Infinity;
+  for (const mk of v.marks) {
+    if (mk.kind !== "run") continue;
+    const d = Math.abs(((mk.at - v.t0) / (v.t1 - v.t0) - frac) * width) - (mk.r.ok ? 0 : 5);
+    if (d < bd) { bd = d; best = mk; }
+  }
+  return best;
+}
+function onPoint(e) {
+  const v = H.V;
+  if (!v || !v.marks.length || !(e.target instanceof Element)) return;
+  if (e.type === "pointerdown" && H.hover && !e.target.closest(".ch-plot, .ev")) return setHover(null); // a tap elsewhere puts the tooltip away
+  const ev = e.target.closest(".ev[data-key]");
+  if (ev) return setHover(ev.dataset.key, "down");
+  const p = e.target.closest(".ch-plot");
+  if (!p) return;
+  const r = p.getBoundingClientRect(), mk = nearestRun(v, (e.clientX - r.left) / r.width, r.width);
+  if (mk) setHover(mk.key, p.dataset.plot);
+}
+stage.addEventListener("pointermove", onPoint);
+stage.addEventListener("pointerdown", onPoint);
+stage.addEventListener("pointerout", (e) => {
+  if (!H.hover || e.pointerType === "touch") return;
+  const to = e.relatedTarget;
+  if (!(to instanceof Element) || !to.closest(".ch-plot, .ev")) setHover(null);
+});
+stage.addEventListener("keydown", (e) => {
+  if (e.target.id !== "h-key" || !H.V) return;
+  const ms = H.V.marks, i = H.hover ? ms.findIndex((m) => m.key === H.hover.key) : -1;
+  const to = { ArrowRight: i + 1, ArrowUp: i + 1, ArrowLeft: i - 1, ArrowDown: i - 1, PageUp: i + 10, PageDown: i - 10, Home: 0, End: ms.length - 1 }[e.key];
+  if (to == null) return;
+  e.preventDefault();
+  if (ms.length) setHover(ms[Math.max(0, Math.min(ms.length - 1, to))].key, H.hover?.plot ?? "down");
+});
+stage.addEventListener("focusin", (e) => { if (e.target.id === "h-key" && H.V?.marks.length && !H.hover) setHover(H.V.marks.at(-1).key, "down"); });
+stage.addEventListener("focusout", (e) => { if (e.target.id === "h-key" && H.hover) setHover(null); });
+
+// ----- the results table -----
+const tagHTML = (r) => (r.path_changed ? `<span class="tag path">Path changed</span>` : r.breach ? `<span class="tag slow">Slow, retested</span>` : "");
+function tableHTML(v) {
+  const all = v.rows.slice().reverse(), list = H.flagged ? all.filter(flagged) : all, shown = list.slice(0, H.rows);
+  const nFlag = all.filter(flagged).length;
+  const when = (r) => `<span>${dDay(r.at)},</span> <span>${dTime(r.at)}</span>`;
+  const wideRow = (r) => {
+    const s = serById(r.series), from = `<td class="from"><i class="sw sm" style="--c:${s.color}"></i><bdi>${esc(s.name)}</bdi></td>`;
+    if (!r.ok) return `<tr class="bad"><td class="when">${when(r)}</td>${from}<td class="why" colspan="5"><b>Failed.</b> ${esc(r.error)}</td></tr>`;
+    return `<tr${r.path_changed ? ' class="has-note"' : ""}><td class="when">${when(r)}</td>${from}<td class="n">${fmt(r.download_mbps)}</td><td class="n">${fmt(r.upload_mbps)}</td><td class="n">${fms(r.idle_ms)} ms</td><td>${r.grade || "–"}</td><td>${tagHTML(r)}</td></tr>`
+      + (r.path_changed ? `<tr class="note-row"><td></td><td colspan="6">${esc(r.note)}</td></tr>` : "");
+  };
+  const narrowRow = (r) => {
+    const s = serById(r.series), dev = `<span class="dev"><i class="sw sm" style="--c:${s.color}"></i><bdi>${esc(s.name)}</bdi></span>`;
+    if (!r.ok) return `<tr class="bad"><td class="when">${when(r)}${dev}</td><td class="why" colspan="4"><b>Failed.</b> ${esc(r.error)}</td></tr>`;
+    return `<tr${r.path_changed ? ' class="has-note"' : ""}><td class="when">${when(r)}${dev}${tagHTML(r)}</td><td class="n">${fmt(r.download_mbps)}</td><td class="n">${fmt(r.upload_mbps)}</td><td class="n">${fms(r.idle_ms)} ms</td><td>${r.grade || "–"}</td></tr>`
+      + (r.path_changed ? `<tr class="note-row"><td colspan="5">${esc(r.note)}</td></tr>` : "");
+  };
+  const more = list.length > shown.length ? `<button class="sbtn" type="button" data-more>Show ${Math.min(15, list.length - shown.length)} more</button>` : "";
+  return `<div class="tbl-h"><h2>Results</h2><label class="ck"><input type="checkbox" id="h-flag"${H.flagged ? " checked" : ""}>Only failed and flagged runs <small>(${nFlag})</small></label></div>
+    <div class="tw tbl-w" role="region" aria-label="Test results" tabindex="0"><table class="hist"><thead><tr><th scope="col">When (UTC)</th><th scope="col">From</th><th scope="col">Down</th><th scope="col">Up</th><th scope="col">Latency</th><th scope="col">Grade</th><th scope="col">Notes</th></tr></thead><tbody>${shown.map(wideRow).join("")}</tbody></table></div>
+    <div class="tw tbl-n" role="region" aria-label="Test results" tabindex="0"><table class="hist"><thead><tr><th scope="col">When (UTC)</th><th scope="col">Down</th><th scope="col">Up</th><th scope="col">Latency</th><th scope="col">Grade</th></tr></thead><tbody>${shown.map(narrowRow).join("")}</tbody></table></div>
+    <div class="tbl-f"><p class="note">Showing ${shown.length} of ${list.length} result${list.length === 1 ? "" : "s"}, newest first. Speeds in ${unitLbl()}; latency is idle latency.</p>${more}</div>`;
+}
+
+// ----- export -----
+function csvText(v) {
+  const q = (x) => (x == null ? "" : /[",\r\n]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : String(x));
+  const lines = [["id", "time_utc", "line", "kind", "status", "download_mbps", "upload_mbps", "idle_ms", "loaded_down_ms", "loaded_up_ms", "jitter_ms", "bufferbloat_ms", "grade", "error_code", "error"].join(",")];
+  for (const r of v.rows) {
+    const s = serById(r.series), status = !r.ok ? "failed" : r.path_changed ? "path_changed" : r.breach ? "slow" : "ok";
+    lines.push([r.id, new Date(r.at).toISOString(), s.name, s.kind === "schedule" ? "scheduled test" : "browser test", status, r.download_mbps, r.upload_mbps, r.idle_ms, r.loaded_down_ms, r.loaded_up_ms, r.jitter_ms, r.bufferbloat_ms, r.grade, r.error_code, r.error].map(q).join(","));
+  }
+  return lines.join("\r\n") + "\r\n";
+}
+function exportCSV() {
+  const v = H.V || build(), name = `dyno-results-${ymd(v.t0)}-to-${ymd(v.t1)}.csv`;
+  const url = URL.createObjectURL(new Blob([csvText(v)], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  $("#h-exp").textContent = `Saved ${name} with ${v.rows.length} rows, for the lines that are showing.`;
+}
+
+// ----- the tab -----
+const noteText = (v) => {
+  const failed = v.rows.filter((r) => !r.ok).length, path = v.rows.filter((r) => r.ok && r.path_changed).length;
+  const left = [failed && `${failed} failed run${failed === 1 ? "" : "s"}`, path && `${path} path change${path === 1 ? "" : "s"}`].filter(Boolean);
+  return `${left.length ? `The stats leave out ${left.join(" and ")}. ` : ""}p10 is the speed that 1 test in 10 fell below. For latency it is p90, the delay that 1 test in 10 went over. Times are UTC.`;
+};
+const whoText = () => SER.filter((s) => H.show.has(s.id)).map((s) => s.name).join(", ") || "none";
+function drawCharts() { const el = $("#h-charts"); if (el && H.V) { el.innerHTML = chartsHTML(H.V); placeLane(); drawOverlay(); } }
+function drawTable() { const el = $("#h-table"); if (el && H.V) el.innerHTML = tableHTML(H.V); }
+function drawHOut() {
+  const out = $("#h-out");
+  if (!out) return;
+  const v = (H.V = build());
+  if (!H.show.size) { out.innerHTML = `<p class="empty">No lines are showing. Pick a far end or a device above.</p>`; return; }
+  if (!v.rows.length) { out.innerHTML = `<p class="empty">No tests in this range. Pick a longer range, or turn on more lines.</p>`; return; }
+  out.innerHTML = `<div class="ch-key sr" id="h-key" role="slider" tabindex="0" aria-label="Walk through the tests and events in this range. Left and right arrow keys move one at a time; Page up and Page down move ten." aria-valuemin="0" aria-valuemax="${v.marks.length - 1}" aria-valuenow="0" aria-valuetext="No test chosen. Use the arrow keys to read one."></div>
+    <div class="charts" id="h-charts"></div><p class="note" id="h-note">${noteText(v)}</p><div id="h-table"></div>`;
+  drawCharts();
+  drawTable();
+}
+function drawHistory(b) {
+  const chips = (kind) => SER.filter((s) => s.kind === kind).map((s) =>
+    `<label class="chip"><input type="checkbox" name="h-ser" value="${s.id}"${H.show.has(s.id) ? " checked" : ""}><span><i class="sw" style="--c:${s.color}"></i><bdi>${esc(s.name)}</bdi>${s.id === THIS_DEVICE ? "<small>this device</small>" : ""}</span></label>`).join("");
+  const minD = ymd(NOW - 30 * DAY), maxD = ymd(NOW);
+  b.innerHTML = `<div class="hist-panel" id="hist">
+    <div id="h-live"></div>
+    <div class="hh">
+      <fieldset class="field rng"><legend class="sr">Time range for every chart</legend><div class="seg">${RANGES.map(([v, l, s]) => `<label><input type="radio" name="h-range" value="${v}"${H.range === v ? " checked" : ""}><span><span class="long">${l}</span><span class="short">${s}</span></span></label>`).join("")}</div></fieldset>
+      <div class="hh-r"><button class="sbtn" type="button" data-export>Export CSV</button></div>
+    </div>
+    <p class="note" id="h-exp" aria-live="polite"></p>
+    <div class="cust" id="h-cust"${H.range === "custom" ? "" : " hidden"}>
+      <div class="field"><label for="h-from">From</label><input type="date" id="h-from" value="${H.from}" min="${minD}" max="${maxD}"></div>
+      <div class="field"><label for="h-to">To</label><input type="date" id="h-to" value="${H.to}" min="${minD}" max="${maxD}"></div>
+      <p class="err" id="h-err" role="alert">${esc(H.err)}</p>
+    </div>
+    <details class="who" id="h-who"${b.clientWidth >= 600 ? " open" : ""}><summary><span class="who-t">Lines to show</span><span class="who-s" id="h-who-s">${whoText()}</span><svg class="who-c" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+      <div class="who-b"><div class="grp"><span class="grp-l">Far ends</span>${chips("schedule")}</div><div class="grp"><span class="grp-l">Devices</span>${chips("device")}</div></div></details>
+    <div id="h-out"></div></div>`;
+  drawHOut();
+  watchHist();
+  if (typeof renderLiveStrip === "function") renderLiveStrip();
+}
+let hRO = null;
+function watchHist() {
+  hRO?.disconnect();
+  const el = $("#hist");
+  if (!el) return;
+  let w0 = el.clientWidth;
+  hRO = new ResizeObserver(() => { const w = el.clientWidth; if (w && Math.abs(w - w0) > 30) { w0 = w; drawCharts(); } });
+  hRO.observe(el);
+}
+function applyCustom() {
+  const f = $("#h-from").value, t = $("#h-to").value, min = ymd(NOW - 30 * DAY), max = ymd(NOW);
+  let err = "";
+  if (!f || !t) err = "Pick a start and an end date.";
+  else if (f > t) err = `The end date (${t}) is before the start date (${f}). Pick an end on or after the start.`;
+  else if (t < min || f > max) err = `dyno has results from ${min} to ${max}. Pick dates in that span.`;
+  H.err = err;
+  $("#h-err").textContent = err;
+  if (err) return;
+  H.from = f < min ? min : f;
+  H.to = t > max ? max : t;
+  H.hover = null; H.rows = 15;
+  drawHOut();
+}
+stage.addEventListener("change", (e) => {
+  const t = e.target;
+  if (!(t instanceof Element) || !t.closest("#hist")) return;
+  if (t.name === "h-range") { H.range = t.value; H.err = ""; H.hover = null; H.rows = 15; $("#h-cust").hidden = H.range !== "custom"; $("#h-err").textContent = ""; drawHOut(); }
+  else if (t.id === "h-from" || t.id === "h-to") applyCustom();
+  else if (t.name === "h-ser") { if (t.checked) H.show.add(t.value); else H.show.delete(t.value); H.hover = null; H.rows = 15; $("#h-who-s").textContent = whoText(); drawHOut(); }
+  else if (t.id === "h-flag") { H.flagged = t.checked; H.rows = 15; drawTable(); $("#h-flag")?.focus(); }
+});
+stage.addEventListener("click", (e) => {
+  const b = e.target instanceof Element ? e.target.closest("[data-export],[data-more]") : null;
+  if (!b || !b.closest("#hist")) return;
+  if (b.hasAttribute("data-export")) exportCSV();
+  else { H.rows += 15; drawTable(); ($("#h-table [data-more]") || $("#h-table .tbl-w"))?.focus(); }
+});
+// ---------- Setup ----------
+const LV = { st: "off", i: 0, t0: 0, timer: 0 }; // the live scheduled test; see "Live progress" below
+Object.assign(A, { ac: null, edit: null, del: null, found: null });
+const RULE = { metric: ALERT_RULE.metric, cmp: "below", unit: "pct", pct: ALERT_RULE.below.percent_of_plan, abs: 400, ms: 50, n: ALERT_RULE.in_a_row, retest: ALERT_RULE.retest, series: ALERT_RULE.series };
+const CHAN = [
+  { k: "ntfy", name: "ntfy", help: "Sends a push to the ntfy app on your phone. Paste your topic's URL.", ph: "https://ntfy.sh/your-topic" },
+  { k: "webhook", name: "Webhook", help: "dyno sends a POST with JSON to this URL when an alert fires or recovers.", ph: "https://example.com/hooks/dyno" },
+  { k: "apprise", name: "Apprise API", help: "The notify URL of your Apprise API, which reaches Telegram, Discord, email and the rest.", ph: "http://apprise:8000/notify/dyno" },
+];
+const CHURL = { ntfy: CHANNELS.find((c) => c.kind === "ntfy")?.url ?? "", webhook: "", apprise: "" };
+const LBL = { fired: "Fired", recovered: "Recovered", digest: "Digest sent" };
+const optHTML = (arr, cur) => arr.map(([v, l]) => `<option value="${v}"${String(cur) === String(v) ? " selected" : ""}>${l}</option>`).join("");
+const segHTML = (name, opts, cur) => `<div class="seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}"${cur === v ? " checked" : ""}><span>${l}</span></label>`).join("")}</div>`;
+const CHK = {
+  ok: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  err: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2l6.2 11H1.8z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6.6v3.2M8 11.6v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  busy: `<span class="spin" aria-hidden="true"></span>`,
+};
+/** A status line that screen readers hear: busy, ok or err, with its words. */
+function setChk(el, kind, text) { if (!el) return; el.className = kind ? `chk ${kind}` : "chk"; el.innerHTML = kind ? `${CHK[kind]}<span>${esc(text)}</span>` : ""; }
+const planVal = () => +cv(S.plan).toFixed(1);
+
+function setupBody() {
+  return `<div class="pnlx" id="setup"><div class="setgrid">
+    <fieldset class="field"><legend>Test length</legend>${segHTML("set-prof", [["quick", "Quick"], ["standard", "Standard"], ["thorough", "Thorough"]], S.profile)}<p class="note">Quick takes about 10 seconds, Standard about 20, Thorough about 30.</p></fieldset>
+    <div class="field"><label for="set-streams">Parallel connections</label><select id="set-streams">${optHTML([["auto", "Auto (recommended)"], ["1", "1"], ["2", "2"], ["4", "4"], ["5", "5"]], S.streams)}</select><p class="note">Auto uses what the server's plan asks for, 5 by default. One connection shows what a single download gets.</p></div>
+    <div class="field"><label for="set-plan">Your plan's download speed (${unitLbl()})</label><input type="number" id="set-plan" min="1" step="any" value="${planVal()}"><p class="note">The red zone starts here. History draws it as a line, and an alert can use it as "% of my plan speed".</p></div>
+    <div class="field"><label for="set-name">This device's name</label><input type="text" id="set-name" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Edge on Windows" value="${esc(S.name)}"><p class="note">History shows it beside this device's tests. Left empty, it's Edge on Windows.</p></div>
+    <fieldset class="field"><legend>Units</legend>${segHTML("set-unit", [["Mbps", "Mbps"], ["MBps", "MB/s"]], S.unit)}</fieldset>
+  </div>
+  <div class="exp"><button class="sbtn" type="button" data-copy>Copy result as JSON</button><span class="note" aria-live="polite" data-copied></span></div>
+  <div class="mon"><h2 class="mon-h">On this server</h2><p class="note">These apply to the whole server, for every device that uses it.</p>${acHTML()}</div></div>`;
+}
+function drawSetup(b) { b.innerHTML = setupBody(); }
+
+// ----- the three sections, each a disclosure with its state in one line -----
+const CHEV = `<svg class="ac-c" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const AC = [
+  ["sched", "Scheduled tests", () => schedSummary(), () => schedBody()],
+  ["alerts", "Alerts", () => alertSummary(), () => alertsBody()],
+  ["keep", "Keep results", () => keepSummary(), () => keepBody()],
+];
+const acHTML = () => AC.map(([id, title, sum, body]) => `<details class="ac" id="ac-${id}" data-ac="${id}"${A.ac === id ? " open" : ""}><summary><span class="ac-t">${title}</span><span class="ac-s" id="ac-s-${id}">${sum()}</span>${CHEV}</summary><div class="ac-b" id="ac-b-${id}">${A.ac === id ? body() : ""}</div></details>`).join("");
+const updateAcSummaries = () => AC.forEach(([id, , sum]) => { const el = $(`#ac-s-${id}`); if (el) el.textContent = sum(); });
+// One section open at a time, so the dialog doesn't grow without end.
+stage.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (!(d instanceof HTMLDetailsElement) || !d.dataset.ac) return;
+  const id = d.dataset.ac;
+  if (!d.open) { if (A.ac === id) A.ac = null; return; }
+  A.ac = id;
+  $$("details.ac").forEach((o) => { if (o !== d) o.open = false; });
+  const body = $(`#ac-b-${id}`);
+  if (!body.childElementCount) body.innerHTML = AC.find((x) => x[0] === id)[3]();
+}, true);
+
+// ----- scheduled tests -----
+const testLabel = (t) => (t === "light" ? "Light test" : "Full test");
+const TEST_NOTE = "Light is a short test with a byte cap, kinder to a line that isn't yours. Full runs 10 seconds each way, like a test in your browser.";
+function usageNote(test, freq) {
+  const f = FREQS.find((x) => x[0] === freq);
+  return test === "full" && f && f[2] <= HOUR ? " A full test this often moves a lot of data: about 450 GB a month at one an hour on a 500 Mbps line, all of it over the far end's connection. Light tests suit someone else's line." : "";
+}
+function nextRun(s) {
+  if (s.freq === "day") {
+    const [h, m] = s.at.split(":").map(Number);
+    let t = Math.floor(NOW / DAY) * DAY + (h * 60 + m) * 60e3;
+    if (t <= NOW) t += DAY;
+    return t;
+  }
+  const t = (s.last ? s.last.at : NOW) + freqMs(s);
+  return t <= NOW ? NOW + 60e3 : t;
+}
+const freqSel = (id, cur) => `<select id="${id}">${FREQS.map(([v, l]) => `<option value="${v}"${cur === v ? " selected" : ""}>${l}${v === "day" ? "…" : ""}</option>`).join("")}</select>`;
+function schedSummary() {
+  const n = SCH.length, nxt = SCH.filter((s) => !s.paused).sort((a, b) => a.next_at - b.next_at)[0];
+  return `${n} far end${n === 1 ? "" : "s"}${LV.st === "run" ? ". tailmeadow is running now" : nxt ? `. Next: ${nxt.far_end.replace(/:3966$/, "")}, ${inText(nxt.next_at)}` : n ? ". All paused" : ""}`;
+}
+function schCard(s) {
+  const ser = serById(s.id), running = LV.st === "run" && s.id === "s-tailmeadow";
+  const name = `<i class="sw sm" style="--c:${ser.color}"></i><h3 class="sch-n"><bdi>${esc(s.far_end)}</bdi></h3>`;
+  if (A.edit === s.id) {
+    return `<li class="sch" data-sid="${s.id}" tabindex="-1"><div class="sch-top">${name}</div>
+      <form class="sch-form" data-sid="${s.id}" novalidate><div class="setgrid">
+        <fieldset class="field"><legend>Test</legend>${segHTML("ed-test", [["light", "Light"], ["full", "Full"]], s.test)}</fieldset>
+        <div class="field"><label for="ed-freq">How often</label>${freqSel("ed-freq", s.freq)}</div>
+        <div class="field" id="ed-at-f"${s.freq === "day" ? "" : " hidden"}><label for="ed-at">At (UTC)</label><input type="time" id="ed-at" value="${s.at}"></div></div>
+        <p class="note" id="ed-note">${TEST_NOTE}${usageNote(s.test, s.freq)}</p>
+        <div class="exp"><button class="sbtn primary" type="submit">Save changes</button><button class="sbtn" type="button" data-act="cancel" data-sid="${s.id}" data-fk="cancel-${s.id}">Cancel</button></div></form></li>`;
+  }
+  if (A.del === s.id) {
+    const n = allRes().filter((r) => r.series === s.id).length;
+    return `<li class="sch" data-sid="${s.id}" tabindex="-1"><div class="sch-top">${name}</div>
+      <p class="conf">Delete the schedule for <b><bdi>${esc(s.far_end)}</bdi></b>? Its ${n} past result${n === 1 ? "" : "s"} stay${n === 1 ? "s" : ""} in History.</p>
+      <div class="exp"><button class="sbtn danger" type="button" data-act="del-yes" data-sid="${s.id}">Delete schedule</button><button class="sbtn" type="button" data-act="del-no" data-sid="${s.id}" data-fk="del-no-${s.id}">Keep it</button></div></li>`;
+  }
+  const l = s.last, lastFail = allRes().filter((r) => r.series === s.id && !r.ok).at(-1);
+  const lastRun = !l ? "No runs yet" : l.ok
+    ? `<b>${fmt(l.download_mbps)}</b> ${unitLbl()} down, <b>${fmt(l.upload_mbps)}</b> up, <b>${fms(l.idle_ms)}</b> ms <span class="when">${agoText(l.at)}</span>`
+    : `<span class="bad">Failed</span> ${esc(l.error)} <span class="when">${agoText(l.at)}</span>`;
+  const next = s.paused ? "Paused. Nothing runs until you resume it." : running ? `<span class="live">Running now</span>` : `${inText(s.next_at)} <span class="when">(${dTime(s.next_at)} UTC)</span>`;
+  const act = (a, label, cls = "") => `<button class="sbtn ${cls}" type="button" data-act="${a}" data-sid="${s.id}" data-fk="${a}-${s.id}" aria-label="${label} schedule for ${esc(s.far_end)}">${label}</button>`;
+  return `<li class="sch${s.paused ? " paused" : ""}" data-sid="${s.id}" tabindex="-1"><div class="sch-top">${name}<span class="tag">dyno ${esc(s.version)}</span><span class="tag">${testLabel(s.test)}</span><span class="tag">${esc(everyText(s))}</span>${s.paused ? '<span class="tag pause">Paused</span>' : ""}</div>
+    <dl class="sch-kv">${running ? `<div><dt>Now</dt><dd class="live" id="sch-now">${typeof liveNowText === "function" ? liveNowText() : ""}</dd></div>` : ""}<div><dt>Last run</dt><dd>${lastRun}</dd></div><div><dt>Next run</dt><dd>${next}</dd></div>${lastFail ? `<div><dt>Last failure</dt><dd><span class="when">${agoText(lastFail.at)}:</span> ${esc(lastFail.error)}</dd></div>` : ""}</dl>
+    ${running ? `<div class="sch-prog" aria-hidden="true"><i id="sch-prog"></i></div>` : ""}
+    <div class="sch-act">${act("edit", "Edit")}${act("pause", s.paused ? "Resume" : "Pause")}${act("del", "Delete", "danger")}</div></li>`;
+}
+function renderSched() {
+  const list = $("#sch-list");
+  if (!list) return;
+  list.innerHTML = SCH.length ? SCH.map(schCard).join("") : `<li class="note">No scheduled tests yet. Add a far end below.</li>`;
+  updateAcSummaries();
+}
+const schedMsg = (t) => { const el = $("#sch-msg"); if (el) el.textContent = t; };
+function schedBody() {
+  return `<ul class="sch-list" id="sch-list">${SCH.map(schCard).join("")}</ul>
+    <p class="note" id="sch-msg" aria-live="polite">Changes apply at once. Nothing needs a restart.</p>
+    <div id="sch-add"><button class="sbtn" type="button" id="add-open" aria-expanded="false" aria-controls="add-form">Add a scheduled test</button>
+      <form class="add-form" id="add-form" hidden novalidate>
+        <h3>Add a scheduled test</h3>
+        <div class="field"><label for="add-addr">Far end address</label>
+          <input type="text" id="add-addr" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="vps.example.com:3966" aria-describedby="add-hint add-status">
+          <p class="note" id="add-hint">Another dyno you run somewhere else, such as a VPS or a relative's house.</p>
+          <p class="chk" id="add-status" role="status"></p></div>
+        <div id="add-more" hidden>
+          <div class="setgrid">
+            <fieldset class="field"><legend>Test</legend>${segHTML("add-test", [["light", "Light"], ["full", "Full"]], "light")}</fieldset>
+            <div class="field"><label for="add-freq">How often</label>${freqSel("add-freq", "3h")}</div>
+            <div class="field" id="add-at-f" hidden><label for="add-at">At (UTC)</label><input type="time" id="add-at" value="03:00"></div></div>
+          <p class="note" id="add-note">${TEST_NOTE}</p>
+          <div class="exp"><button class="sbtn primary" type="submit">Save schedule</button><button class="sbtn" type="button" id="add-cancel">Cancel</button></div></div>
+        <div class="exp" id="add-cancel-only"><button class="sbtn" type="button" id="add-cancel2">Cancel</button></div>
+      </form></div>`;
+}
+// Adding one: type the address, "Checking…" for about a second, then what was found.
+let addTimer = 0, addRun = 0;
+const addHold = () => location.hash.includes("hold");
+function normalizeAddr(raw) {
+  const a = raw.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  if (!/^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:\d{1,5})?$/.test(a)) return null;
+  return a.includes(":") ? a : `${a}:3966`;
+}
+function addCheck(now) {
+  clearTimeout(addTimer);
+  addRun++;
+  A.found = null;
+  $("#add-more").hidden = true;
+  $("#add-cancel-only").hidden = false;
+  const raw = $("#add-addr").value.trim();
+  setChk($("#add-status"), "", "");
+  if (!raw) return;
+  addTimer = setTimeout(() => runCheck(raw), now ? 0 : 700);
+}
+function runCheck(raw) {
+  const host = normalizeAddr(raw), st = $("#add-status"), id = ++addRun;
+  if (!host) return setChk(st, "err", `"${raw}" doesn't look like an address. Type a name or an IP address and, if the port isn't 3966, the port, such as vps.example.com:3966.`);
+  if (SCH.some((s) => s.far_end === host)) return setChk(st, "err", `You already have a schedule for ${host}. Edit that one instead.`);
+  setChk(st, "busy", "Checking…");
+  if (addHold()) return;
+  setTimeout(() => {
+    if (id !== addRun || !$("#add-status")) return;
+    if (/down|offline|refused/i.test(raw)) return setChk(st, "err", `Couldn't reach ${host}: the connection timed out. Check the address, and that dyno is running there with its port open.`);
+    A.found = host;
+    setChk(st, "ok", `Found dyno v0.1.0 at ${host}`);
+    $("#add-more").hidden = false;
+    $("#add-cancel-only").hidden = true;
+  }, 1000);
+}
+function openAdd(open) {
+  $("#add-form").hidden = !open;
+  $("#add-open").hidden = open;
+  $("#add-open").setAttribute("aria-expanded", String(open));
+  if (open) { $("#add-cancel-only").hidden = false; $("#add-addr").focus(); }
+  else { clearTimeout(addTimer); addRun++; A.found = null; $("#add-addr").value = ""; setChk($("#add-status"), "", ""); $("#add-more").hidden = true; $("#add-open").focus(); }
+}
+function saveAdd() {
+  const host = A.found;
+  if (!host) { addCheck(true); return; }
+  const test = $('input[name="add-test"]:checked').value, freq = $("#add-freq").value, at = $("#add-at").value || "03:00";
+  const id = `s-${host.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+  const s = { id, far_end: host, version: "v0.1.0", test, freq, at, every: "", paused: false, last: null, next_at: NOW + 60e3 };
+  s.every = everyText(s);
+  SCH.push(s);
+  SER.push({ id, kind: "schedule", name: host.replace(/:3966$/, ""), where: "A dyno you added", color: EXTRA_COLORS[(SER.length - 5) % EXTRA_COLORS.length] });
+  H.show.add(id);
+  openAdd(false);
+  renderSched();
+  schedMsg(`Added ${host}. Its first test runs in about a minute, and it appears in History as soon as it has a result. The change applies at once.`);
+  $(`.sch[data-sid="${id}"]`)?.focus();
+}
+function schAct(act, sid) {
+  const s = SCH.find((x) => x.id === sid);
+  if (!s) return;
+  const keep = (k) => $(`[data-fk="${k}"]`)?.focus();
+  if (act === "edit") { A.edit = sid; A.del = null; renderSched(); $(`.sch[data-sid="${sid}"] input:checked`)?.focus(); }
+  else if (act === "cancel") { A.edit = null; renderSched(); keep(`edit-${sid}`); }
+  else if (act === "pause") {
+    s.paused = !s.paused;
+    if (!s.paused) s.next_at = nextRun(s);
+    renderSched();
+    schedMsg(s.paused ? `Paused ${s.far_end}. No tests run there until you resume it. The change applies at once.` : `Resumed ${s.far_end}. Next run ${inText(s.next_at)}. The change applies at once.`);
+    keep(`pause-${sid}`);
+  } else if (act === "del") { A.del = sid; A.edit = null; renderSched(); keep(`del-no-${sid}`); }
+  else if (act === "del-no") { A.del = null; renderSched(); keep(`del-${sid}`); }
+  else if (act === "del-yes") {
+    SCH.splice(SCH.indexOf(s), 1);
+    A.del = null;
+    renderSched();
+    schedMsg(`Deleted the schedule for ${s.far_end}. Its past results are still in History. The change applies at once.`);
+    ($("#add-open") || $("#sch-msg"))?.focus();
+  }
+}
+function saveEdit(form) {
+  const s = SCH.find((x) => x.id === form.dataset.sid);
+  if (!s) return;
+  s.test = form.querySelector('input[name="ed-test"]:checked').value;
+  s.freq = $("#ed-freq").value;
+  s.at = $("#ed-at").value || "03:00";
+  s.every = everyText(s);
+  s.next_at = nextRun(s);
+  A.edit = null;
+  renderSched();
+  schedMsg(`Saved. ${s.far_end} now runs a ${s.test} test ${everyText(s).toLowerCase()}, starting at once with no restart. Next run ${inText(s.next_at)}.`);
+  $(`[data-fk="edit-${s.id}"]`)?.focus();
+}
+
+// ----- alerts -----
+const valDisp = () => (RULE.unit === "pct" ? RULE.pct : RULE.unit === "abs" ? +cv(RULE.abs).toFixed(1) : RULE.ms);
+const unitOpts = () => (RULE.metric === "download" ? [["pct", "% of my plan speed"], ["abs", unitLbl()]] : RULE.metric === "upload" ? [["abs", unitLbl()]] : [["ms", "ms"]]);
+function ruleText() {
+  const who = RULE.series === "any" ? "any far end's" : `${serById(RULE.series).name}'s`;
+  const lim = RULE.unit === "pct" ? `${fmt((S.plan * RULE.pct) / 100)} ${unitLbl()} (${RULE.pct}% of your ${fmt(S.plan)} ${unitLbl()} plan)` : RULE.unit === "abs" ? `${fmt(RULE.abs)} ${unitLbl()}` : `${RULE.ms} ms`;
+  return `You'll get an alert when ${who} ${RULE.metric} is ${RULE.cmp} ${lim} on ${RULE.n} scheduled test${RULE.n === 1 ? "" : "s"} in a row. ${RULE.retest ? "dyno retests once before it counts a breach. " : ""}You'll get one message when it recovers.`;
+}
+function refreshRule() { const el = $("#r-text"); if (el) el.textContent = ruleText(); }
+const digestNote = () => ({ off: "No digest. Each alert arrives on its own, when it happens.", daily: "One summary a day: how many scheduled tests ran, how many failed and the download median. Alerts still arrive when they happen.", weekly: "One summary a week: how many scheduled tests ran, how many failed and the download median. Alerts still arrive when they happen." })[S.digest];
+function alertSummary() {
+  const ch = CHAN.filter((c) => CHURL[c.k].trim()).map((c) => c.name);
+  return `1 rule, ${ch.length ? ch.join(" and ") : "no channel yet"}, ${S.digest === "off" ? "no digest" : `${S.digest} digest`}`;
+}
+function alertsBody() {
+  const far = [["any", "Any far end"], ...SER.filter((s) => s.kind === "schedule").map((s) => [s.id, s.name])];
+  const log = ALERTS.map((a, i) => ({ ...a, i })).sort((a, b) => b.at - a.at);
+  return `<section class="sec" aria-labelledby="al-h1"><h3 id="al-h1">When to alert</h3>
+    <div class="setgrid rule-grid">
+      <div class="field"><label for="r-metric">Alert on</label><select id="r-metric">${optHTML([["download", "Download"], ["upload", "Upload"], ["latency", "Latency"]], RULE.metric)}</select></div>
+      <div class="field"><label for="r-cmp">When it is</label><select id="r-cmp">${optHTML([["below", "Below"], ["above", "Above"]], RULE.cmp)}</select></div>
+      <div class="field"><label for="r-val">Limit</label><div class="pair"><input type="number" id="r-val" min="1" step="any" value="${valDisp()}"><select id="r-unit" aria-label="Unit of the limit">${optHTML(unitOpts(), RULE.unit)}</select></div></div>
+      <div class="field"><label for="r-series">On</label><select id="r-series">${optHTML(far, RULE.series)}</select></div>
+      <div class="field"><label for="r-n">After this many tests in a row</label><input type="number" id="r-n" min="1" max="20" value="${RULE.n}"></div>
+    </div>
+    <label class="ck"><input type="checkbox" id="r-retest"${RULE.retest ? " checked" : ""}>Retest once before counting a breach</label>
+    <p class="rule-text" id="r-text">${esc(ruleText())}</p><p class="chk" id="r-msg" role="status"></p></section>
+  <section class="sec" aria-labelledby="al-h2"><h3 id="al-h2">Where alerts go</h3>
+    ${CHAN.map((c) => `<div class="chan"><div class="field"><label for="ch-${c.k}">${c.name}</label><div class="chan-row"><input type="url" id="ch-${c.k}" value="${esc(CHURL[c.k])}" placeholder="${c.ph}" autocomplete="off" spellcheck="false" aria-describedby="ch-${c.k}-h ch-${c.k}-s"><button class="sbtn" type="button" data-test="${c.k}" aria-label="Send a test to ${c.name}">Send a test</button></div>
+      <p class="note" id="ch-${c.k}-h">${c.help}</p><p class="chk" id="ch-${c.k}-s" role="status"></p></div></div>`).join("")}
+    <p class="note">dyno only sends to the addresses you put here.</p></section>
+  <section class="sec" aria-labelledby="al-h3"><h3 id="al-h3">Digest and silence</h3>
+    <fieldset class="field"><legend>Digest</legend>${segHTML("al-digest", [["off", "Off"], ["daily", "Daily"], ["weekly", "Weekly"]], S.digest)}<p class="note" id="digest-note">${digestNote()}</p></fieldset>
+    <div class="field"><label class="ck"><input type="checkbox" id="al-stop"${S.stopAlert ? " checked" : ""}>Tell me if scheduled tests stop</label><p class="note">Sends a message if a schedule hasn't run for twice its interval, so a stopped scheduler can't go unnoticed.</p></div></section>
+  <section class="sec" aria-labelledby="al-h4"><h3 id="al-h4">Alert log</h3>
+    <ol class="alog">${log.map((a) => `<li><span class="lk ${a.kind}">${LBL[a.kind]}</span><div><p class="al-t"><time datetime="${new Date(a.at).toISOString()}">${dFull(a.at)}</time> <span class="when">(${agoText(a.at)})</span></p><p>${esc(a.text)}</p>${a.kind === "digest" ? "" : `<button class="lnk" type="button" data-chart="${a.i}">Show it on the History chart</button>`}</div></li>`).join("")}</ol></section>`;
+}
+function sendTest(k) {
+  const c = CHAN.find((x) => x.k === k), inp = $(`#ch-${k}`), st = $(`#ch-${k}-s`), url = inp.value.trim();
+  if (!url) { setChk(st, "err", `Add a ${c.name} URL first, then send a test.`); inp.focus(); return; }
+  if (!/^https?:\/\/[^\s/]+/i.test(url)) { setChk(st, "err", "That doesn't look like a web address. It should start with http:// or https://."); inp.focus(); return; }
+  const host = url.replace(/^https?:\/\//i, "").split("/")[0];
+  setChk(st, "busy", `Sending a test to ${host}…`);
+  setTimeout(() => { if ($(`#ch-${k}-s`)) { if (/fail|404/i.test(url)) setChk($(`#ch-${k}-s`), "err", `Couldn't send the test: ${host} answered 404 Not Found. Check the URL, and that the service is running.`); else setChk($(`#ch-${k}-s`), "ok", `Test sent to ${host}. It should arrive in a few seconds.`); } }, 900);
+}
+function gotoAlert(i) {
+  H.range = "30d"; H.show.add(ALERT_RULE.series); H.hover = null;
+  openSheet("history");
+  setHover(`a${i}`);
+  $(".cp-ev")?.scrollIntoView({ block: "start" });
+}
+
+// ----- keep results -----
+const keepSummary = () => (S.keepDays == null ? "Forever" : `${S.keepDays} days`);
+function keepNote() {
+  if (S.keepDays == null) return "Results stay until you remove them. This is the default.";
+  return `dyno deletes results older than ${S.keepDays} day${S.keepDays === 1 ? "" : "s"} once a night. Deleted results can't be brought back, so export a CSV from History first if you want a copy.${S.keepDays < 30 ? " History's 30-day range will show fewer days than that." : ""}`;
+}
+function keepBody() {
+  return `<fieldset class="field"><legend>Keep results</legend>${segHTML("keep", [["forever", "Forever"], ["days", "For a number of days"]], S.keepDays == null ? "forever" : "days")}</fieldset>
+    <div class="field" id="keep-f"${S.keepDays == null ? " hidden" : ""}><label for="keep-days">Days to keep</label><input type="number" id="keep-days" min="1" step="1" value="${S.keepDays ?? 90}"></div>
+    <p class="note" id="keep-note">${keepNote()}</p><p class="chk" id="keep-msg" role="status"></p>`;
+}
+
+// ----- events for all of Setup -----
+stage.addEventListener("click", async (e) => {
+  const t = e.target instanceof Element ? e.target : null;
+  if (!t) return;
+  const act = t.closest("[data-act]");
+  if (act) return schAct(act.dataset.act, act.dataset.sid);
+  if (t.closest("#add-open")) return openAdd(true);
+  if (t.closest("#add-cancel, #add-cancel2")) return openAdd(false);
+  const test = t.closest("[data-test]");
+  if (test) return sendTest(test.dataset.test);
+  const ch = t.closest("[data-chart]");
+  if (ch) return gotoAlert(Number(ch.dataset.chart));
+  const cp = t.closest("[data-copy]");
+  if (cp) {
+    const out = cp.parentElement.querySelector("[data-copied]"), { id, at, download_mbps, upload_mbps, idle_ms, loaded_down_ms, loaded_up_ms, jitter_ms, bufferbloat_ms, grade: g } = ME;
+    try { await navigator.clipboard.writeText(JSON.stringify({ id, at: new Date(at).toISOString(), download_mbps, upload_mbps, idle_ms, loaded_down_ms, loaded_up_ms, jitter_ms, bufferbloat_ms, grade: g }, null, 2)); out.textContent = "Copied"; }
+    catch { out.textContent = "Copying is blocked here. The result is in History."; }
+  }
+});
+stage.addEventListener("submit", (e) => {
+  const f = e.target;
+  if (!(f instanceof HTMLFormElement)) return;
+  e.preventDefault();
+  if (f.id === "add-form") saveAdd();
+  else if (f.classList.contains("sch-form")) saveEdit(f);
+});
+stage.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "add-addr") { e.preventDefault(); if (A.found) saveAdd(); else addCheck(true); } }); // Enter checks the address, and once it's found, saves
+stage.addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.id === "add-addr") addCheck(false);
+  else if (t.id === "r-val" || t.id === "r-n") { const v = Number(t.value); if (v > 0) { if (t.id === "r-n") RULE.n = Math.round(v); else if (RULE.unit === "pct") RULE.pct = v; else if (RULE.unit === "abs") RULE.abs = uv(v); else RULE.ms = v; refreshRule(); } }
+});
+stage.addEventListener("change", (e) => {
+  const t = e.target;
+  if (!(t instanceof Element) || !t.closest("#setup")) return;
+  const saved = (id, text) => { setChk($(id), "ok", text); updateAcSummaries(); };
+  if (t.name === "set-prof") S.profile = t.value;
+  else if (t.id === "set-streams") S.streams = t.value;
+  else if (t.id === "set-name") S.name = t.value.trim();
+  else if (t.id === "set-plan") { const v = Number(t.value); if (v > 0) { S.plan = uv(v); renderFirst(); refreshRule(); } else t.value = planVal(); }
+  else if (t.name === "set-unit") { S.unit = t.value; renderFirst(); drawSetup($("#sheet-body")); $('input[name="set-unit"]:checked')?.focus(); }
+  else if (t.id === "r-metric") {
+    RULE.metric = t.value;
+    RULE.unit = t.value === "download" ? "pct" : t.value === "upload" ? "abs" : "ms";
+    RULE.cmp = t.value === "latency" ? "above" : "below";
+    RULE.pct = 80; RULE.abs = t.value === "upload" ? 60 : 400; RULE.ms = 50;
+    $("#r-cmp").value = RULE.cmp; $("#r-unit").innerHTML = optHTML(unitOpts(), RULE.unit); $("#r-val").value = valDisp();
+    refreshRule(); saved("#r-msg", "Saved. The rule applies from the next test, with no restart.");
+  } else if (t.id === "r-cmp") { RULE.cmp = t.value; refreshRule(); saved("#r-msg", "Saved. The rule applies from the next test, with no restart."); }
+  else if (t.id === "r-unit") { RULE.unit = t.value; $("#r-val").value = valDisp(); refreshRule(); saved("#r-msg", "Saved. The rule applies from the next test, with no restart."); }
+  else if (t.id === "r-series") { RULE.series = t.value; refreshRule(); saved("#r-msg", "Saved. The rule applies from the next test, with no restart."); }
+  else if (t.id === "r-val" || t.id === "r-n") {
+    if (!(Number(t.value) > 0)) { setChk($("#r-msg"), "err", "Enter a number above 0, or the rule stays as it was."); t.value = t.id === "r-n" ? RULE.n : valDisp(); }
+    else saved("#r-msg", "Saved. The rule applies from the next test, with no restart.");
+  } else if (t.id === "r-retest") { RULE.retest = t.checked; refreshRule(); saved("#r-msg", "Saved. The rule applies from the next test, with no restart."); }
+  else if (t.id?.startsWith("ch-")) { CHURL[t.id.slice(3)] = t.value.trim(); updateAcSummaries(); }
+  else if (t.name === "al-digest") { S.digest = t.value; $("#digest-note").textContent = digestNote(); updateAcSummaries(); }
+  else if (t.id === "al-stop") S.stopAlert = t.checked;
+  else if (t.name === "keep") {
+    S.keepDays = t.value === "forever" ? null : Number($("#keep-days").value) || 90;
+    $("#keep-f").hidden = S.keepDays == null; $("#keep-note").textContent = keepNote();
+    saved("#keep-msg", S.keepDays == null ? "Saved. dyno keeps every result." : `Saved. Tonight dyno deletes anything older than ${S.keepDays} days.`);
+  } else if (t.id === "keep-days") {
+    const v = Math.round(Number(t.value));
+    if (!(v >= 1)) { setChk($("#keep-msg"), "err", "Enter a whole number of days, 1 or more."); t.value = S.keepDays ?? 90; return; }
+    S.keepDays = v; $("#keep-note").textContent = keepNote(); saved("#keep-msg", `Saved. Tonight dyno deletes anything older than ${v} days.`);
+  } else if (t.id === "ed-freq" || t.name === "ed-test") {
+    const f = $("#ed-freq").value, test = $('input[name="ed-test"]:checked').value;
+    $("#ed-at-f").hidden = f !== "day"; $("#ed-note").textContent = TEST_NOTE + usageNote(test, f);
+  } else if (t.id === "add-freq" || t.name === "add-test") {
+    const f = $("#add-freq").value, test = $('input[name="add-test"]:checked').value;
+    $("#add-at-f").hidden = f !== "day"; $("#add-note").textContent = TEST_NOTE + usageNote(test, f);
+  }
+});
+// ---------- Live progress: a scheduled test that starts while the page is open ----------
+// It shows in three places and never on the dial: the first screen's message line (ADR-0016's two lines of space),
+// a strip at the top of History, and the running schedule's row in Setup. The first two link to History.
+const PH = { warm: "Warm-up", latency: "Latency", download: "Download", upload: "Upload", done: "Done" };
+const LIVE_DONE = LIVE_RUN.findIndex((f) => f.phase === "done"); // frame where the run ends
+const liveLeft = () => Math.max(0, Math.ceil(LIVE_RUN[LV.i].t === 0 ? LIVE_RUN[LIVE_DONE].t : LIVE_RUN[LIVE_DONE].t - LIVE_RUN[LV.i].t - 1e-6));
+const liveNowText = () => `${{ warm: "Warming up the path", latency: "Measuring latency", download: "Measuring download", upload: "Measuring upload", done: "Finishing" }[LIVE_RUN[LV.i].phase]}, about ${liveLeft()} s left`;
+const digits = (t) => String(t).replace(/\d/g, '<span class="tn">$&</span>');
+
+function renderMsg() {
+  const m = $("#f-msg");
+  if (!m) return;
+  const mode = A.note ? "note" : LV.st === "run" ? "run" : LV.st === "done" ? "done" : "";
+  if (m.dataset.mode !== mode) {
+    m.dataset.mode = mode;
+    m.innerHTML = mode === "run" ? `<span class="m1"><i class="pulse"></i>Scheduled test to <b>tailmeadow</b></span><span class="m2"><span id="m-ph"></span> · <button class="lnk" type="button" data-go="history">Watch in History</button></span>`
+      : mode === "done" ? `<span class="m1">Scheduled test to <b>tailmeadow</b> finished</span><span class="m2">The result is in <button class="lnk" type="button" data-go="history">History</button></span>` : "";
+  }
+  if (mode === "note") m.textContent = A.note;
+  if (mode === "run") $("#m-ph").textContent = `${PH[LIVE_RUN[LV.i].phase]}, ${liveLeft()} s left`;
+}
+
+function renderLiveStrip() {
+  const el = $("#h-live");
+  if (!el) return;
+  if (LV.st === "off" || LV.st === "wait") { el.innerHTML = ""; return; }
+  if (LV.st === "done") {
+    const r = EXTRA_RES.at(-1);
+    el.innerHTML = `<div class="lv done" role="group" aria-label="Scheduled test finished"><div><p class="lv-t">Finished just now: <b>tailmeadow</b>, light test</p><p class="lv-x"><b>${fmt(r.download_mbps)}</b> ${unitLbl()} down, <b>${fmt(r.upload_mbps)}</b> up, <b>${fms(r.idle_ms)}</b> ms. It is the newest row in Results below and the last point on the charts.</p></div></div>`;
+    return;
+  }
+  const f = LIVE_RUN[LV.i], frames = LIVE_RUN.slice(0, LV.i + 1), W = 130, Hh = 44, T = LIVE_RUN[LIVE_DONE].t;
+  const path = (ph) => frames.filter((q) => q.phase === ph).map((q, i) => `${i ? "L" : "M"}${((q.t / T) * W).toFixed(1)} ${(Hh - 2 - Math.min(1, q.mbps / 520) * (Hh - 6)).toFixed(1)}`).join("");
+  const order = ["warm", "latency", "download", "upload"], at = order.indexOf(f.phase);
+  const num = f.phase === "download" || f.phase === "upload";
+  el.innerHTML = `<div class="lv" role="group" aria-label="Scheduled test running now"><div>
+      <p class="lv-t"><i class="pulse"></i>Running now: <b>tailmeadow</b>, light test</p>
+      <ol class="lv-ph">${order.map((p, i) => `<li${i === at ? ' class="now" aria-current="step"' : ""}>${PH[p]}${i < at ? " (done)" : ""}</li>`).join("")}</ol>
+      <div class="lv-n"><span>${num ? digits(fmt(f.mbps)) : "–"}<small>${unitLbl()}</small></span><span>${digits(fms(f.ms))}<small>ms</small></span></div></div>
+    <div class="lv-c" aria-hidden="true"><svg viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none"><path class="d" d="${path("download")}"/><path class="u" d="${path("upload")}"/></svg></div>
+    <div class="sch-prog" aria-hidden="true"><i style="width:${Math.min(100, (f.t / T) * 100).toFixed(1)}%"></i></div></div>`;
+}
+function renderLiveSetup() {
+  const now = $("#sch-now"), prog = $("#sch-prog");
+  if (now && LV.st === "run") now.textContent = liveNowText();
+  if (prog && LV.st === "run") prog.style.width = `${Math.min(100, (LIVE_RUN[LV.i].t / LIVE_RUN[LIVE_DONE].t) * 100).toFixed(1)}%`;
+}
+function liveRenderAll(changed) {
+  renderMsg();
+  renderLiveStrip();
+  if ($("#sch-list")) { if (changed || LV.cardSt !== LV.st) { LV.cardSt = LV.st; renderSched(); } renderLiveSetup(); }
+  if (LV.sumSt !== LV.st) { LV.sumSt = LV.st; updateAcSummaries(); }
+  if (changed && $("#h-out")) drawHOut();
+}
+function liveReset() { clearInterval(LV.timer); clearTimeout(LV.doneTimer); LV.st = "off"; LV.i = 0; }
+function liveStart(delay = 1200) {
+  liveReset();
+  EXTRA_RES.length = 0; // a replay starts from the data as it was
+  const s = SCH.find((x) => x.id === "s-tailmeadow");
+  if (s) { s.last = last("s-tailmeadow"); s.next_at = last("s-tailmeadow").at + 3 * HOUR; }
+  LV.st = "wait";
+  LV.t0 = performance.now() + delay;
+  LV.timer = setInterval(liveTick, 100);
+  liveRenderAll(true);
+}
+function liveTick() {
+  const el = (performance.now() - LV.t0) / 1000;
+  if (el < 0) return;
+  if (LV.st === "wait") { LV.st = "run"; announce("Scheduled test to tailmeadow started."); }
+  LV.i = Math.min(LIVE_RUN.length - 1, Math.floor(el * 10));
+  if (LV.i >= LIVE_DONE) return liveFinish();
+  liveRenderAll(false);
+}
+function liveFinish() {
+  clearInterval(LV.timer);
+  LV.st = "done";
+  LV.i = LIVE_DONE;
+  const by = (ph, from) => LIVE_RUN.filter((f) => f.phase === ph && f.t >= from);
+  const dl = by("download", 4.5).map((f) => f.mbps), ul = by("upload", 9.5).map((f) => f.mbps);
+  const idle = mean(by("latency", 0).map((f) => f.ms)), bd = mean(by("download", 3).map((f) => f.ms)), bu = mean(by("upload", 8).map((f) => f.ms));
+  const added = Math.max(bd, bu) - idle;
+  const res = { id: RESULTS.length + 1, series: "s-tailmeadow", at: NOW, ok: true, download_mbps: r1(mean(dl)), upload_mbps: r1(mean(ul)), idle_ms: r1(idle), loaded_down_ms: r1(bd), loaded_up_ms: r1(bu), jitter_ms: 0.9, bufferbloat_ms: r1(added), grade: grade(added) };
+  EXTRA_RES.push(res);
+  const s = SCH.find((x) => x.id === "s-tailmeadow");
+  if (s) { s.last = res; s.next_at = NOW + 3 * HOUR; }
+  announce(`Scheduled test to tailmeadow finished: ${fmt(res.download_mbps)} ${unitLbl()} down. It is in History.`);
+  liveRenderAll(true);
+  LV.doneTimer = setTimeout(() => { if (LV.st === "done") { LV.st = "off"; liveRenderAll(false); } }, 20000);
+}
+$("#replay").onclick = () => liveStart(300);
+
+// ---------- start ----------
+/** The stage is as tall as the window below the shell, so the dialog is judged at a real window's height. */
+function sizeStage() {
+  const small = innerWidth <= 520, top = stage.getBoundingClientRect().top + scrollY, avail = innerHeight - top - (small ? 0 : 16);
+  const h = small ? Math.max(560, avail) : stage.classList.contains("phone") ? Math.min(844, Math.max(660, avail)) : Math.max(640, avail);
+  stage.style.setProperty("--stage-h", `${Math.round(h)}px`);
+}
+$("#about").onclick = (e) => { const on = $("#blurb").classList.toggle("open"); e.currentTarget.setAttribute("aria-expanded", String(on)); sizeStage(); };
+addEventListener("resize", sizeStage);
+document.fonts?.ready.then(sizeStage);
+renderFirst();
+sizeStage();
+fit();
+addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (H.hover) setHover(null); // Escape dismisses the tooltip first, without moving the pointer (WCAG 1.4.13)
+  else if (A.sheet) closeSheet();
+});
+$("#frame-t").onclick = (e) => { const on = e.currentTarget.getAttribute("aria-pressed") !== "true"; e.currentTarget.setAttribute("aria-pressed", on); stage.classList.toggle("phone", on); sizeStage(); };
+/** The address bar can open a state, so a view can be linked or screenshotted: #history,7d  #setup,alerts  #setup,sched,addr=vps.example.com  #history,hover=fail  #nolive */
+function applyHash() {
+  const toks = location.hash.slice(1).split(",").filter(Boolean), has = (t) => toks.includes(t);
+  const val = (k) => toks.find((t) => t.startsWith(`${k}=`))?.slice(k.length + 1);
+  for (const r of ["24h", "7d", "30d", "custom"]) if (has(r)) H.range = r;
+  if (has("all")) SER.forEach((s) => H.show.add(s.id));
+  if (has("devices")) SER.filter((s) => s.kind === "device").forEach((s) => H.show.add(s.id));
+  if (has("failed")) H.flagged = true;
+  const ac = ["sched", "alerts", "keep"].find(has);
+  if (ac) A.ac = ac;
+  if (has("edit")) A.edit = SCH[0].id;
+  if (has("delete")) A.del = SCH[0].id;
+  const tab = TABS.map(([k]) => k).find(has) || (ac ? "setup" : null);
+  if (!has("nolive")) liveStart(1200);
+  if (!tab) return;
+  openSheet(tab);
+  if (tab === "setup" && (has("add") || val("addr"))) { openAdd(true); if (val("addr")) { $("#add-addr").value = decodeURIComponent(val("addr")); addCheck(true); } }
+  const hv = val("hover");
+  if (tab === "history" && hv && H.V) {
+    const mk = H.V.marks.find((m) => (hv === "fail" ? m.kind === "run" && !m.r.ok : hv === "path" ? m.kind === "run" && m.r.path_changed : hv === "slow" ? m.kind === "run" && m.r.breach : hv === "fired" ? m.kind === "alert" && m.a.kind === "fired" : false));
+    if (mk) setHover(mk.key, "down");
+  }
+}
+applyHash();
+</script>
+</body>
+</html>

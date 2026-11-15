@@ -9,6 +9,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redlinelabs-dev/dyno/server/internal/testrun"
 )
@@ -41,6 +42,19 @@ type Result struct {
 	RPM             int     `json:"rpm"`
 	ServerBytesDown int64   `json:"server_bytes_down"`
 	ServerBytesUp   int64   `json:"server_bytes_up"`
+
+	// Scheduled tests only (ADR-0028); client results leave these empty.
+	ScheduleID  int64    `json:"schedule_id,omitempty"`
+	FarEnd      string   `json:"far_end,omitempty"` // the far end's base URL when it ran
+	PathChanged bool     `json:"path_changed,omitempty"`
+	Failure     *Failure `json:"failure,omitempty"` // set on a failed run, which has no measurements
+}
+
+// Failure says why a scheduled test failed (ADR-0028, docs/api.md).
+type Failure struct {
+	Code    string `json:"code"`    // unreachable, timeout, not_dyno, http_status, stream_failed, bad_far_end or internal
+	Phase   string `json:"phase"`   // the stage that failed; "" before the far end's plan was read
+	Message string `json:"message"` // a plain sentence about what was seen
 }
 
 const maxClientLen = 80
@@ -84,6 +98,9 @@ func (s *Submission) Validate() error {
 	}
 	if !ValidDevice(s.Device) {
 		return errors.New("device must be up to 64 letters, digits, - or _")
+	}
+	if len(s.Detail) > 0 && (!utf8.Valid(s.Detail) || !json.Valid(s.Detail)) {
+		return errors.New("detail must be valid UTF-8 JSON, or empty")
 	}
 	if len(s.Client) > maxClientLen {
 		s.Client = strings.ToValidUTF8(s.Client[:maxClientLen], "")
