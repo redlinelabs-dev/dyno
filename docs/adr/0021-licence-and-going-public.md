@@ -30,9 +30,10 @@ decisions-pending #6 (licence) and #7 (visibility).
 
 ## Consequences
 
-- M4 adds `LICENSE` (AGPLv3), a licence header policy, `CONTRIBUTING.md` and
-  a CLA. Use a standard text, such as the Apache ICLA or a Harmony agreement,
-  with an automated check on pull requests. Pick the tool when it's built.
+- ADR-0034 (2026-11-15) adds `LICENSE` and `CONTRIBUTING.md`, settles headers,
+  and takes the repo public before the CLA tooling exists.
+- M4 adds the CLA. Use a standard text, such as the Apache ICLA or a Harmony
+  agreement, with an automated check on pull requests. Pick the tool when it's built.
 - Paid features still live in their own module (CLAUDE.md), so a later pro
   module costs no rewrite.
 - Dependencies must be AGPL-compatible. Today the server needs only the Go

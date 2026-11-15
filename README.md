@@ -49,3 +49,10 @@ Open Claude Code in this folder and paste:
 > Read CLAUDE.md, then docs/brief.md, docs/decisions-pending.md and
 > docs/ROADMAP.md. Ask me any pending decision that blocks the next
 > milestone. Then plan that milestone and build it.
+
+## License
+
+dyno is licensed under the GNU Affero General Public License v3 (`LICENSE`).
+You can run, change and share it. If you run a changed version as a network
+service, you have to publish your changes. Contributions: see
+`CONTRIBUTING.md`.
